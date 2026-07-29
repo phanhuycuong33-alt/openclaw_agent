@@ -1,0 +1,9 @@
+.env
+node_modules/
+AUTH/
+media/
+*.log
+*.sqlite
+*.db
+Cookies
+Preferences
