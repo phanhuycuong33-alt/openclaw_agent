@@ -133,13 +133,17 @@ dispatch_to_supervisor() {
     log_task "Dispatching to Supervisor: $task"
     echo ""
     
-    # Find container
-    CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E "openclaw.*gateway" | head -1)
+    # Find container (try multiple patterns)
+    CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -iE "openclaw|gateway" | head -1)
     
     if [ -z "$CONTAINER" ]; then
         log_error "Cannot find OpenClaw Gateway container"
+        log_info "Running containers:"
+        docker ps --format '{{.Names}}' 2>/dev/null || echo "(none)"
         return 1
     fi
+    
+    log_info "Using container: $CONTAINER"
     
     # Read spec files and create full prompt
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -203,13 +207,13 @@ PROMPT_EOF
         poll_for_results "$task_id"
     else
         echo "$response" | jq -r '.response // .message // .error // .' 2>/dev/null || echo "$response"
+        echo ""
+        # API returned, now poll for worker results
+        poll_for_results "$task_id"
     fi
     
     # Cleanup
     rm -f "$prompt_file"
-    
-    # Check for result files
-    check_worker_results
 }
 
 poll_for_results() {
@@ -218,7 +222,17 @@ poll_for_results() {
     local elapsed=0
     local check_interval=5
     
-    log_info "Polling for worker results..."
+    # Ensure container is set
+    if [ -z "$CONTAINER" ]; then
+        CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -iE "openclaw|gateway" | head -1)
+    fi
+    
+    if [ -z "$CONTAINER" ]; then
+        log_error "No container found for polling"
+        return 1
+    fi
+    
+    log_info "Polling for worker results in container: $CONTAINER"
     
     while [ $elapsed -lt $max_wait ]; do
         # Check if any result file exists
@@ -285,14 +299,30 @@ poll_for_results() {
 check_worker_results() {
     log_info "Checking for Worker results..."
     
+    # Make sure we have a container
+    if [ -z "$CONTAINER" ]; then
+        CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -iE "openclaw|gateway" | head -1)
+    fi
+    
+    if [ -z "$CONTAINER" ]; then
+        log_warn "No container found to check results"
+        return 1
+    fi
+    
+    local found=0
     for result_file in "worker-auth-result.md" "worker-generate-code-result.md" "worker-publish-mcp-result.md"; do
         if docker exec "$CONTAINER" test -f "/home/node/.openclaw/workspace/$result_file" 2>/dev/null; then
             log_success "Found: $result_file"
             echo ""
             docker exec "$CONTAINER" cat "/home/node/.openclaw/workspace/$result_file"
             echo ""
+            found=1
         fi
     done
+    
+    if [ $found -eq 0 ]; then
+        log_info "No result files found yet"
+    fi
 }
 
 # =============================================================================
