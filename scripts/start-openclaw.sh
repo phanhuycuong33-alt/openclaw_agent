@@ -19,7 +19,12 @@ echo "Copying agent specs..."
 cp -r "$REPO_ROOT/supervisor" "$WORKSPACE_DIR/" 2>/dev/null || true
 cp -r "$REPO_ROOT/workers" "$WORKSPACE_DIR/" 2>/dev/null || true
 cp -r "$REPO_ROOT/config" "$WORKSPACE_DIR/" 2>/dev/null || true
-# DO NOT copy openclaw.json - OpenClaw will create its own default config
+
+# Copy minimal OpenClaw config if not exists
+if [ ! -f "$OPENCLAW_DIR/openclaw.mjs" ]; then
+    cp "$REPO_ROOT/docker/openclaw.mjs" "$OPENCLAW_DIR/" 2>/dev/null || true
+    echo "Created openclaw.mjs config"
+fi
 echo "Done"
 
 echo "=== Starting SSH agent ==="
