@@ -8,6 +8,7 @@ Automation scripts for OpenClaw Agent.
 |--------|---------|
 | `setup-wsl.sh` | **Main setup script** - Installs all dependencies (Docker, Node.js, SSH, etc.) |
 | `verify-environment.sh` | Checks if environment is ready to run agents |
+| `test-agents.sh` | Test individual workers or start interactive CLI |
 
 ## Runtime
 
