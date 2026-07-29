@@ -14,12 +14,12 @@ mkdir -p "$OPENCLAW_DIR"
 mkdir -p "$WORKSPACE_DIR"
 mkdir -p "$WORKSPACE_DIR/AUTH"
 
-# Copy agent specs to workspace
+# Copy agent specs to workspace (not openclaw.json - let OpenClaw create default)
 echo "Copying agent specs..."
 cp -r "$REPO_ROOT/supervisor" "$WORKSPACE_DIR/" 2>/dev/null || true
 cp -r "$REPO_ROOT/workers" "$WORKSPACE_DIR/" 2>/dev/null || true
 cp -r "$REPO_ROOT/config" "$WORKSPACE_DIR/" 2>/dev/null || true
-cp "$REPO_ROOT/openclaw.json" "$OPENCLAW_DIR/" 2>/dev/null || true
+# DO NOT copy openclaw.json - OpenClaw will create its own default config
 echo "Done"
 
 echo "=== Starting SSH agent ==="

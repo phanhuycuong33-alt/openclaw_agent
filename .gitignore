@@ -7,3 +7,5 @@ media/
 *.db
 Cookies
 Preferences
+# OpenClaw config is auto-generated, don't commit custom ones
+openclaw.json
