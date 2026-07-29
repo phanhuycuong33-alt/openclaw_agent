@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 #
 # OpenClaw Agent - Test Script
-# Test các workers sau khi setup
+# Test agents với AI model thông qua Supervisor
 #
-# Usage: ./scripts/test-agents.sh [worker_name]
-# Example: ./scripts/test-agents.sh auth
+# Usage: ./scripts/test-agents.sh [command]
 #
 
 set -e
@@ -14,17 +13,71 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_task() { echo -e "${CYAN}[TASK]${NC} $1"; }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 GATEWAY_URL="http://localhost:18789"
+ENV_FILE="$REPO_ROOT/docker/.env"
 
 # =============================================================================
-# CHECK GATEWAY
+# PRE-FLIGHT CHECKS
 # =============================================================================
+
+check_api_key() {
+    log_info "Checking AI Model API configuration..."
+    
+    if [ ! -f "$ENV_FILE" ]; then
+        log_error ".env file not found at docker/.env"
+        echo ""
+        echo "Create it from template:"
+        echo "  cp config/env.example docker/.env"
+        echo "  # Then add your API key"
+        return 1
+    fi
+    
+    # Source env file
+    set -a
+    source "$ENV_FILE" 2>/dev/null || true
+    set +a
+    
+    # Check for API keys
+    API_CONFIGURED=false
+    
+    if [ -n "$ANTHROPIC_API_KEY" ] && [ "$ANTHROPIC_API_KEY" != "" ]; then
+        log_success "Anthropic API key configured"
+        API_CONFIGURED=true
+    fi
+    
+    if [ -n "$OPENAI_API_KEY" ] && [ "$OPENAI_API_KEY" != "" ]; then
+        log_success "OpenAI API key configured"
+        API_CONFIGURED=true
+    fi
+    
+    if [ -n "$AZURE_OPENAI_API_KEY" ] && [ "$AZURE_OPENAI_API_KEY" != "" ]; then
+        log_success "Azure OpenAI API key configured"
+        API_CONFIGURED=true
+    fi
+    
+    if [ "$API_CONFIGURED" = false ]; then
+        log_error "No AI API key configured!"
+        echo ""
+        echo "Edit docker/.env and add one of:"
+        echo "  ANTHROPIC_API_KEY=sk-ant-..."
+        echo "  OPENAI_API_KEY=sk-..."
+        echo ""
+        return 1
+    fi
+    
+    return 0
+}
 
 check_gateway() {
     log_info "Checking OpenClaw Gateway..."
@@ -37,164 +90,264 @@ check_gateway() {
         echo ""
         echo "Start OpenClaw first:"
         echo "  ./scripts/start-openclaw.sh"
-        echo ""
-        echo "Or manually:"
-        echo "  cd docker && docker compose up -d"
+        return 1
+    fi
+}
+
+check_vnc() {
+    log_info "Checking VNC..."
+    
+    if curl -s --connect-timeout 3 "http://localhost:6080" > /dev/null 2>&1; then
+        log_success "VNC accessible at http://localhost:6080"
+        return 0
+    else
+        log_warn "VNC not accessible (browser automation may not work)"
         return 1
     fi
 }
 
 # =============================================================================
-# TEST WORKER AUTH
+# SUPERVISOR DISPATCH
 # =============================================================================
 
-test_worker_auth() {
-    log_info "Testing Worker Auth..."
-    echo ""
-    echo "Worker Auth manages browser authentication sessions."
-    echo ""
-    echo "To test Worker Auth, you need to:"
-    echo ""
-    echo "1. Open VNC viewer: http://localhost:6080"
-    echo ""
-    echo "2. Use OpenClaw CLI to call Worker Auth:"
-    echo "   docker exec -it openclaw-gateway npx openclaw chat"
-    echo ""
-    echo "3. Send a task to authenticate with a provider:"
-    echo "   Example prompts:"
-    echo "   - 'Check GitHub authentication status'"
-    echo "   - 'Authenticate with GitHub'"
-    echo "   - 'Verify my GitHub session'"
-    echo ""
-    echo "4. Watch the browser in VNC - Worker Auth will:"
-    echo "   - Open browser if needed"
-    echo "   - Check login status"
-    echo "   - Request user action if authentication needed"
-    echo "   - Write status to AUTH/<provider>.json"
-    echo ""
-}
-
-# =============================================================================
-# TEST WORKER GENERATE CODE
-# =============================================================================
-
-test_worker_generate() {
-    log_info "Testing Worker Generate Code..."
-    echo ""
-    echo "Worker Generate Code creates MCP server projects."
-    echo ""
-    echo "To test:"
-    echo ""
-    echo "1. Use OpenClaw CLI:"
-    echo "   docker exec -it openclaw-gateway npx openclaw chat"
-    echo ""
-    echo "2. Send a task to generate MCP:"
-    echo "   Example prompts:"
-    echo "   - 'Generate a simple MCP server called hello-mcp with one tool'"
-    echo "   - 'Create an MCP server that returns the current time'"
-    echo ""
-    echo "3. Check results:"
-    echo "   - Look for worker-generate-code-result.md"
-    echo "   - Check the generated project in workspace"
-    echo ""
-}
-
-# =============================================================================
-# TEST WORKER PUBLISH
-# =============================================================================
-
-test_worker_publish() {
-    log_info "Testing Worker Publish MCP..."
-    echo ""
-    echo "Worker Publish MCP publishes to MCP marketplaces via browser."
-    echo ""
-    echo "Prerequisites:"
-    echo "  - Worker Auth must have valid GitHub session"
-    echo "  - An MCP project must exist (from Worker Generate Code)"
-    echo ""
-    echo "To test:"
-    echo ""
-    echo "1. Open VNC viewer: http://localhost:6080"
-    echo ""
-    echo "2. Use OpenClaw CLI:"
-    echo "   docker exec -it openclaw-gateway npx openclaw chat"
-    echo ""
-    echo "3. Send a publish task:"
-    echo "   Example prompts:"
-    echo "   - 'Publish the hello-mcp project to GitHub'"
-    echo "   - 'Submit hello-mcp to MCP marketplace'"
-    echo ""
-}
-
-# =============================================================================
-# QUICK HEALTHCHECK
-# =============================================================================
-
-quick_test() {
-    log_info "Running quick health check..."
+dispatch_to_supervisor() {
+    local task="$1"
+    local task_id="task_$(date +%s)"
+    
+    log_task "Dispatching to Supervisor: $task"
     echo ""
     
-    # Check Gateway
-    if curl -s --connect-timeout 5 "$GATEWAY_URL/healthz" > /dev/null 2>&1; then
-        log_success "Gateway: Running"
-    else
-        log_error "Gateway: Not running"
+    # Find container
+    CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E "openclaw.*gateway" | head -1)
+    
+    if [ -z "$CONTAINER" ]; then
+        log_error "Cannot find OpenClaw Gateway container"
+        return 1
     fi
     
-    # Check Docker containers
+    # Create task file for Supervisor
+    local task_file="/tmp/supervisor-task-$task_id.md"
+    cat > "$task_file" << EOF
+# Supervisor Task
+
+Task ID: $task_id
+Timestamp: $(date -Iseconds)
+User Request: $task
+
+## Instructions
+
+1. Read supervisor/SUPERVISOR_SPEC.md for your role
+2. Analyze this task
+3. Dispatch to appropriate Worker(s)
+4. Wait for Worker result
+5. Report back
+
+EOF
+    
+    # Copy task file to container
+    docker cp "$task_file" "$CONTAINER:/home/node/.openclaw/workspace/"
+    
+    # Execute task via OpenClaw CLI
+    log_info "Executing via OpenClaw..."
+    echo ""
+    echo "─────────────────────────────────────────────"
+    
+    # Send task to openclaw
+    docker exec -it "$CONTAINER" npx openclaw chat --message "$task"
+    
+    echo "─────────────────────────────────────────────"
+    echo ""
+    
+    # Cleanup
+    rm -f "$task_file"
+    
+    # Check for result files
+    log_info "Checking for Worker results..."
+    
+    for result_file in "worker-auth-result.md" "worker-generate-code-result.md" "worker-publish-mcp-result.md"; do
+        if docker exec "$CONTAINER" test -f "/home/node/.openclaw/workspace/$result_file" 2>/dev/null; then
+            log_success "Found: $result_file"
+            echo ""
+            docker exec "$CONTAINER" cat "/home/node/.openclaw/workspace/$result_file"
+            echo ""
+        fi
+    done
+}
+
+# =============================================================================
+# TEST COMMANDS
+# =============================================================================
+
+test_auth() {
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════════════╗"
+    echo "║              Testing Worker Auth via Supervisor                       ║"
+    echo "╚═══════════════════════════════════════════════════════════════════════╝"
+    echo ""
+    
+    check_api_key || return 1
+    check_gateway || return 1
+    check_vnc
+    
+    echo ""
+    log_info "This test will:"
+    echo "  1. Send task to Supervisor"
+    echo "  2. Supervisor dispatches to Worker Auth"
+    echo "  3. Worker Auth checks GitHub browser session"
+    echo "  4. Worker Auth writes AUTH/github.json"
+    echo "  5. Worker Auth writes worker-auth-result.md"
+    echo "  6. Supervisor reports result"
+    echo ""
+    echo "Watch VNC at http://localhost:6080 to see browser"
+    echo ""
+    read -p "Press Enter to start test..."
+    echo ""
+    
+    dispatch_to_supervisor "Check if GitHub is authenticated. Verify the browser session and report the authentication status."
+}
+
+test_generate() {
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════════════╗"
+    echo "║           Testing Worker Generate Code via Supervisor                 ║"
+    echo "╚═══════════════════════════════════════════════════════════════════════╝"
+    echo ""
+    
+    check_api_key || return 1
+    check_gateway || return 1
+    
+    echo ""
+    log_info "This test will:"
+    echo "  1. Send task to Supervisor"
+    echo "  2. Supervisor dispatches to Worker Generate Code"
+    echo "  3. Worker generates a minimal MCP server"
+    echo "  4. Worker writes worker-generate-code-result.md"
+    echo "  5. Supervisor reports result"
+    echo ""
+    read -p "Press Enter to start test..."
+    echo ""
+    
+    dispatch_to_supervisor "Generate a simple MCP server called 'hello-test-mcp' with one tool named 'hello_test' that returns 'Hello from test MCP!'"
+}
+
+test_full_flow() {
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════════════╗"
+    echo "║              Full Flow Test: Auth → Generate → Publish                ║"
+    echo "╚═══════════════════════════════════════════════════════════════════════╝"
+    echo ""
+    
+    check_api_key || return 1
+    check_gateway || return 1
+    check_vnc
+    
+    echo ""
+    log_info "This test will run the full agent pipeline:"
+    echo "  1. Supervisor checks authentication (Worker Auth)"
+    echo "  2. Supervisor generates MCP project (Worker Generate Code)"
+    echo "  3. Supervisor publishes to GitHub (Worker Publish MCP)"
+    echo ""
+    log_warn "This is a comprehensive test and may take several minutes."
+    echo ""
+    read -p "Press Enter to start full flow test..."
+    echo ""
+    
+    dispatch_to_supervisor "Create a simple MCP server called 'test-flow-mcp' with a 'hello' tool, then publish it to GitHub. First verify GitHub authentication."
+}
+
+quick_check() {
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════════════╗"
+    echo "║                    Quick Environment Check                            ║"
+    echo "╚═══════════════════════════════════════════════════════════════════════╝"
+    echo ""
+    
+    # API Key
+    check_api_key
+    API_OK=$?
+    
+    # Gateway
+    check_gateway  
+    GW_OK=$?
+    
+    # VNC
+    check_vnc
+    VNC_OK=$?
+    
+    # Docker
+    log_info "Checking Docker containers..."
     if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "openclaw"; then
         CONTAINERS=$(docker ps --format '{{.Names}}' | grep openclaw | tr '\n' ', ' | sed 's/,$//')
-        log_success "Docker: $CONTAINERS"
+        log_success "Running: $CONTAINERS"
     else
-        log_error "Docker: No openclaw containers running"
+        log_error "No OpenClaw containers running"
     fi
     
-    # Check VNC
-    if curl -s --connect-timeout 3 "http://localhost:6080" > /dev/null 2>&1; then
-        log_success "VNC: Accessible at http://localhost:6080"
+    # Auth status
+    log_info "Checking authentication status..."
+    AUTH_DIR="$REPO_ROOT/AUTH"
+    if [ -d "$AUTH_DIR" ]; then
+        for auth_file in "$AUTH_DIR"/*.json; do
+            if [ -f "$auth_file" ]; then
+                provider=$(basename "$auth_file" .json)
+                status=$(jq -r '.status // "unknown"' "$auth_file" 2>/dev/null || echo "parse_error")
+                if [ "$status" = "authenticated" ]; then
+                    log_success "$provider: authenticated"
+                else
+                    log_warn "$provider: $status"
+                fi
+            fi
+        done
     else
-        log_error "VNC: Not accessible"
+        log_info "No authentication data yet (AUTH/ directory not found)"
     fi
     
-    # Check auth directory
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-    if [ -d "$REPO_ROOT/auth" ]; then
-        AUTH_FILES=$(find "$REPO_ROOT/auth" -name "*.json" 2>/dev/null | wc -l)
-        if [ "$AUTH_FILES" -gt 0 ]; then
-            log_success "Auth: $AUTH_FILES provider(s) configured"
-        else
-            log_info "Auth: No providers authenticated yet"
-        fi
-    fi
+    echo ""
+    echo "═══════════════════════════════════════════════════════════════════════"
     
+    if [ $API_OK -eq 0 ] && [ $GW_OK -eq 0 ]; then
+        echo ""
+        log_success "Environment ready for agent testing!"
+        echo ""
+        echo "Run a test:"
+        echo "  ./scripts/test-agents.sh auth      # Test authentication"
+        echo "  ./scripts/test-agents.sh generate  # Test code generation"
+        echo "  ./scripts/test-agents.sh flow      # Test full pipeline"
+        echo "  ./scripts/test-agents.sh cli       # Interactive mode"
+    else
+        echo ""
+        log_error "Environment not ready. Fix issues above first."
+    fi
     echo ""
 }
 
-# =============================================================================
-# INTERACTIVE CLI
-# =============================================================================
-
 start_cli() {
-    log_info "Starting OpenClaw CLI..."
     echo ""
+    log_info "Starting Interactive CLI..."
     
-    if ! check_gateway; then
-        exit 1
+    check_api_key || return 1
+    check_gateway || return 1
+    
+    CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E "openclaw.*gateway" | head -1)
+    
+    if [ -z "$CONTAINER" ]; then
+        log_error "Cannot find OpenClaw Gateway container"
+        return 1
     fi
     
-    echo "Entering interactive chat mode..."
-    echo "Type your tasks for the agents. Use Ctrl+C to exit."
     echo ""
+    echo "Entering interactive chat mode."
+    echo "Your messages go to Supervisor who coordinates Workers."
+    echo "Type 'exit' or Ctrl+C to quit."
+    echo ""
+    echo "Example tasks:"
+    echo "  - Check GitHub authentication status"
+    echo "  - Create a simple MCP server called my-mcp"  
+    echo "  - Publish my-mcp to GitHub"
+    echo ""
+    echo "─────────────────────────────────────────────"
     
-    # Try to exec into container
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "openclaw-gateway"; then
-        docker exec -it $(docker ps --format '{{.Names}}' | grep "openclaw-gateway" | head -1) npx openclaw chat
-    else
-        log_error "Cannot find openclaw-gateway container"
-        echo ""
-        echo "Start with: ./scripts/start-openclaw.sh"
-    fi
+    docker exec -it "$CONTAINER" npx openclaw chat
 }
 
 # =============================================================================
@@ -207,44 +360,34 @@ show_help() {
     echo "Usage: $0 [command]"
     echo ""
     echo "Commands:"
-    echo "  check       Quick health check (default)"
-    echo "  auth        Test Worker Auth"
-    echo "  generate    Test Worker Generate Code"
-    echo "  publish     Test Worker Publish MCP"
-    echo "  cli         Start interactive CLI"
-    echo "  all         Show all test instructions"
+    echo "  check      Quick environment check (default)"
+    echo "  auth       Test Worker Auth (verify GitHub login)"
+    echo "  generate   Test Worker Generate Code (create MCP)"
+    echo "  flow       Test full pipeline: Auth → Generate → Publish"
+    echo "  cli        Interactive chat with Supervisor"
     echo ""
-    echo "Examples:"
-    echo "  $0              # Quick health check"
-    echo "  $0 auth         # Instructions for testing Worker Auth"
-    echo "  $0 cli          # Start interactive CLI session"
+    echo "Prerequisites:"
+    echo "  1. Run setup:  ./scripts/setup-wsl.sh"
+    echo "  2. Add API key to docker/.env"
+    echo "  3. Start OpenClaw: ./scripts/start-openclaw.sh"
     echo ""
 }
 
 case "${1:-check}" in
     check)
-        quick_test
+        quick_check
         ;;
     auth)
-        check_gateway && test_worker_auth
+        test_auth
         ;;
     generate)
-        check_gateway && test_worker_generate
+        test_generate
         ;;
-    publish)
-        check_gateway && test_worker_publish
+    flow)
+        test_full_flow
         ;;
     cli)
         start_cli
-        ;;
-    all)
-        check_gateway
-        echo ""
-        test_worker_auth
-        echo "─────────────────────────────────────────────"
-        test_worker_generate
-        echo "─────────────────────────────────────────────"
-        test_worker_publish
         ;;
     -h|--help|help)
         show_help

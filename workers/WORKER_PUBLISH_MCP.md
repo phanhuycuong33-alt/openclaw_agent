@@ -96,6 +96,76 @@ git config --global user.email || true
 git remote -v || true
 ```
 
+---
+
+# Authentication Dependency
+
+Worker Publish MCP depends on Worker Auth for GitHub access. Before any publishing task:
+
+## Pre-Publish Authentication Check
+
+1. **Read** `AUTH/github.json` to check existing auth status
+2. If file exists and `status: authenticated`:
+   - Verify session is still valid (not expired)
+   - If valid → proceed with publishing
+3. If file missing OR `status: not_authenticated` OR expired:
+   - **DO NOT** attempt to authenticate yourself
+   - Return `BLOCKED` with `next_action: CALL_AUTH`
+   - Supervisor will dispatch Worker Auth
+
+## When GitHub Operation Fails Due to Permission
+
+If during publishing you encounter:
+- `Permission denied`
+- `Authentication failed`
+- `Repository not found` (could be permission issue)
+- `403 Forbidden`
+- `401 Unauthorized`
+
+Then:
+
+1. Write result file with:
+   ```yaml
+   status: BLOCKED
+   next_action: CALL_AUTH
+   blocker: "GitHub authentication failed or insufficient permissions"
+   ```
+2. Supervisor will:
+   - Dispatch Worker Auth to re-authenticate
+   - After Worker Auth completes, retry Worker Publish
+
+## Result File Format
+
+Write result to `worker-publish-mcp-result.md`:
+
+```yaml
+worker: publish
+task: <task_id>
+status: PASS | FAILED | BLOCKED | REQUIRES_USER_ACTION
+next_action: NONE | CALL_AUTH | RETRY | USER_ACTION
+blocker: <description_if_blocked>
+provider: github
+project: <project_name>
+artifact: <repo_url_or_path>
+summary: <human_readable_summary>
+```
+
+### Example: Blocked due to no auth
+
+```yaml
+worker: publish
+task: task_001
+status: BLOCKED
+next_action: CALL_AUTH
+blocker: "GitHub authentication not found. AUTH/github.json missing."
+provider: github
+project: hello-mcp
+artifact: null
+summary: "Cannot publish - GitHub authentication required. Please authenticate first."
+```
+
+---
+
 # Browser and Web Automation Setup (Local WSL + Xvfb + CDP)
 
 ## Browser Readiness Checklist

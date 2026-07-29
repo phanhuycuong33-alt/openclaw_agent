@@ -1,0 +1,72 @@
+{
+  "$schema": "https://openclaw.ai/schemas/agents.json",
+  "version": "1.0",
+  "supervisor": {
+    "name": "Supervisor",
+    "description": "Central orchestrator that coordinates all workers",
+    "spec": "supervisor/SUPERVISOR_SPEC.md",
+    "model": "${AGENT_PROVIDER}",
+    "systemPrompt": "You are the Supervisor. Read supervisor/SUPERVISOR_SPEC.md for your responsibilities. Coordinate workers to complete user tasks."
+  },
+  "workers": {
+    "auth": {
+      "name": "Worker Auth",
+      "description": "Manages browser authentication sessions",
+      "spec": "workers/WORKER_AUTH.md",
+      "model": "${AGENT_PROVIDER}",
+      "capabilities": [
+        "browser_automation",
+        "session_management"
+      ],
+      "resultFile": "worker-auth-result.md",
+      "triggers": [
+        "authenticate",
+        "login",
+        "verify session",
+        "check auth"
+      ]
+    },
+    "generate": {
+      "name": "Worker Generate Code",
+      "description": "Generates MCP server projects",
+      "spec": "workers/WORKER_GENERATE_CODE.md",
+      "model": "${AGENT_PROVIDER}",
+      "capabilities": [
+        "code_generation",
+        "file_system"
+      ],
+      "resultFile": "worker-generate-code-result.md",
+      "triggers": [
+        "create mcp",
+        "generate",
+        "build server",
+        "new project"
+      ]
+    },
+    "publish": {
+      "name": "Worker Publish MCP",
+      "description": "Publishes MCP servers to marketplaces",
+      "spec": "workers/WORKER_PUBLISH_MCP.md",
+      "model": "${AGENT_PROVIDER}",
+      "capabilities": [
+        "browser_automation",
+        "git_operations",
+        "marketplace_publishing"
+      ],
+      "resultFile": "worker-publish-mcp-result.md",
+      "triggers": [
+        "publish",
+        "deploy",
+        "submit to marketplace"
+      ],
+      "requires": ["auth"]
+    }
+  },
+  "settings": {
+    "logFile": "supervisor-log.md",
+    "authDir": "AUTH",
+    "workspaceDir": "${OPENCLAW_WORKSPACE_DIR}",
+    "timeout": 300,
+    "retryAttempts": 3
+  }
+}

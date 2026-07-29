@@ -50,7 +50,7 @@ fi
 # STEP 1: SYSTEM PACKAGES
 # =============================================================================
 
-log_info "Step 1/7: Updating system packages..."
+log_info "Step 1/8: Updating system packages..."
 
 sudo apt-get update -qq
 sudo apt-get upgrade -y -qq
@@ -92,7 +92,7 @@ log_success "System packages installed"
 # STEP 2: DOCKER
 # =============================================================================
 
-log_info "Step 2/7: Setting up Docker..."
+log_info "Step 2/8: Setting up Docker..."
 
 if command -v docker &> /dev/null; then
     log_success "Docker already installed: $(docker --version)"
@@ -143,7 +143,7 @@ fi
 # STEP 3: NODE.JS
 # =============================================================================
 
-log_info "Step 3/7: Setting up Node.js..."
+log_info "Step 3/8: Setting up Node.js..."
 
 if command -v node &> /dev/null; then
     NODE_VERSION=$(node --version)
@@ -167,7 +167,7 @@ fi
 # STEP 4: SSH KEYS FOR GITHUB
 # =============================================================================
 
-log_info "Step 4/7: Checking SSH keys for GitHub..."
+log_info "Step 4/8: Checking SSH keys for GitHub..."
 
 SSH_KEY_PATH="$HOME/.ssh/id_ed25519"
 SSH_KEY_EXISTS=false
@@ -239,7 +239,7 @@ fi
 # STEP 5: OPENCLAW DIRECTORIES
 # =============================================================================
 
-log_info "Step 5/7: Creating OpenClaw directories..."
+log_info "Step 5/8: Creating OpenClaw directories..."
 
 OPENCLAW_DIRS=(
     "$HOME/.openclaw"
@@ -256,7 +256,7 @@ done
 # STEP 6: ENVIRONMENT CONFIGURATION
 # =============================================================================
 
-log_info "Step 6/7: Setting up environment configuration..."
+log_info "Step 6/8: Setting up environment configuration..."
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -303,7 +303,7 @@ fi
 # STEP 7: BUILD DOCKER IMAGE
 # =============================================================================
 
-log_info "Step 7/7: Building OpenClaw Docker image..."
+log_info "Step 7/8: Building OpenClaw Docker image..."
 
 if docker info &>/dev/null; then
     cd "$DOCKER_DIR"
@@ -331,6 +331,71 @@ if docker info &>/dev/null; then
 else
     log_warn "Docker not accessible - skipping image build"
     log_info "Run 'newgrp docker' or re-login, then run: cd docker && docker build -t openclaw-ssh:latest -f Dockerfile.openclaw-ssh ."
+fi
+
+# =============================================================================
+# STEP 8: AI API CONFIGURATION
+# =============================================================================
+
+log_info "Step 8/8: AI API Configuration..."
+
+# Check if API key is already configured
+API_CONFIGURED=false
+if [ -f "$ENV_FILE" ]; then
+    if grep -q "ANTHROPIC_API_KEY=sk-" "$ENV_FILE" 2>/dev/null; then
+        log_success "Anthropic API key already configured"
+        API_CONFIGURED=true
+    elif grep -q "OPENAI_API_KEY=sk-" "$ENV_FILE" 2>/dev/null; then
+        log_success "OpenAI API key already configured"
+        API_CONFIGURED=true
+    fi
+fi
+
+if [ "$API_CONFIGURED" = false ]; then
+    echo ""
+    log_warn "AI API key not configured yet."
+    echo ""
+    echo "The agents require an AI model API to function."
+    echo "Supported providers: Anthropic Claude, OpenAI GPT-4"
+    echo ""
+    read -p "Do you want to configure an API key now? (Y/n): " -n 1 -r
+    echo
+    
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        echo ""
+        echo "Choose provider:"
+        echo "  1) Anthropic Claude (recommended)"
+        echo "  2) OpenAI"
+        echo "  3) Skip for now"
+        echo ""
+        read -p "Enter choice [1-3]: " provider_choice
+        
+        case "$provider_choice" in
+            1)
+                read -p "Enter Anthropic API key (sk-ant-...): " api_key
+                if [ -n "$api_key" ]; then
+                    echo "" >> "$ENV_FILE"
+                    echo "# AI Model Configuration" >> "$ENV_FILE"
+                    echo "ANTHROPIC_API_KEY=$api_key" >> "$ENV_FILE"
+                    echo "AGENT_PROVIDER=anthropic" >> "$ENV_FILE"
+                    log_success "Anthropic API key saved to docker/.env"
+                fi
+                ;;
+            2)
+                read -p "Enter OpenAI API key (sk-...): " api_key
+                if [ -n "$api_key" ]; then
+                    echo "" >> "$ENV_FILE"
+                    echo "# AI Model Configuration" >> "$ENV_FILE"
+                    echo "OPENAI_API_KEY=$api_key" >> "$ENV_FILE"
+                    echo "AGENT_PROVIDER=openai" >> "$ENV_FILE"
+                    log_success "OpenAI API key saved to docker/.env"
+                fi
+                ;;
+            *)
+                log_info "Skipped. Add API key later to docker/.env"
+                ;;
+        esac
+    fi
 fi
 
 # =============================================================================
@@ -363,10 +428,16 @@ if ! groups | grep -q docker; then
     echo ""
 fi
 
+echo -e "${YELLOW}⚠ REQUIRED:${NC} Configure AI API key before running agents:"
+echo "    Edit docker/.env and add your API key:"
+echo "    ANTHROPIC_API_KEY=sk-ant-...  (or OPENAI_API_KEY=sk-...)"
+echo ""
 echo "Next steps:"
-echo "  1. Edit docker/.env if needed"
+echo "  1. Add AI API key to docker/.env (REQUIRED)"
 echo "  2. Start OpenClaw:"
-echo "     cd docker && docker compose up -d"
+echo "     ./scripts/start-openclaw.sh"
+echo "  3. Test agents:"
+echo "     ./scripts/test-agents.sh"
 echo ""
 echo "  Or use the quick start script:"
 echo "     ./scripts/start-openclaw.sh"
