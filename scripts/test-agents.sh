@@ -153,13 +153,42 @@ EOF
     # Copy task file to container
     docker cp "$task_file" "$CONTAINER:/home/node/.openclaw/workspace/"
     
-    # Execute task via OpenClaw CLI
-    log_info "Executing via OpenClaw..."
+    log_info "Task copied to container workspace"
+    echo ""
+    
+    # Provide options for execution
+    echo "═══════════════════════════════════════════════════════════════════════"
+    echo ""
+    echo "Choose how to run the task:"
+    echo ""
+    echo "  Option 1: Web Interface (Recommended)"
+    echo "  ─────────────────────────────────────"
+    echo "  Open: http://localhost:18789"
+    echo "  Then paste this task:"
+    echo ""
+    echo "  $task"
+    echo ""
+    echo "  Option 2: Interactive CLI"
+    echo "  ─────────────────────────"
+    echo "  Run: docker exec -it $CONTAINER openclaw"
+    echo ""
+    echo "  Option 3: Direct API (curl)"
+    echo "  ────────────────────────────"
+    echo "  See: http://localhost:18789/api/docs"
+    echo ""
+    echo "═══════════════════════════════════════════════════════════════════════"
+    echo ""
+    
+    read -p "Press Enter to open interactive CLI, or Ctrl+C to skip..."
+    echo ""
+    
+    # Start interactive CLI
+    log_info "Starting OpenClaw interactive mode..."
+    echo "Type your task and press Enter. Type 'exit' to quit."
     echo ""
     echo "─────────────────────────────────────────────"
     
-    # Send task to openclaw
-    docker exec -it "$CONTAINER" npx openclaw chat --message "$task"
+    docker exec -it "$CONTAINER" openclaw || docker exec -it "$CONTAINER" npx openclaw
     
     echo "─────────────────────────────────────────────"
     echo ""
@@ -329,7 +358,7 @@ quick_check() {
 
 start_cli() {
     echo ""
-    log_info "Starting Interactive CLI..."
+    log_info "Starting Interactive Mode..."
     
     check_api_key || return 1
     check_gateway || return 1
@@ -342,18 +371,28 @@ start_cli() {
     fi
     
     echo ""
-    echo "Entering interactive chat mode."
-    echo "Your messages go to Supervisor who coordinates Workers."
-    echo "Type 'exit' or Ctrl+C to quit."
+    echo "═══════════════════════════════════════════════════════════════════════"
     echo ""
-    echo "Example tasks:"
+    echo "  OpenClaw Agent - Interactive Mode"
+    echo ""
+    echo "  Web Interface:  http://localhost:18789"
+    echo "  VNC Browser:    http://localhost:6080"
+    echo ""
+    echo "═══════════════════════════════════════════════════════════════════════"
+    echo ""
+    echo "Example tasks to try:"
     echo "  - Check GitHub authentication status"
     echo "  - Create a simple MCP server called my-mcp"  
     echo "  - Publish my-mcp to GitHub"
     echo ""
     echo "─────────────────────────────────────────────"
+    echo ""
     
-    docker exec -it "$CONTAINER" npx openclaw chat
+    # Try different ways to start CLI
+    docker exec -it "$CONTAINER" openclaw 2>/dev/null || \
+    docker exec -it "$CONTAINER" npx openclaw 2>/dev/null || \
+    docker exec -it "$CONTAINER" node dist/index.js 2>/dev/null || \
+    echo "Note: CLI not available. Use web interface at http://localhost:18789"
 }
 
 # =============================================================================
