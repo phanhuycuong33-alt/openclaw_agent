@@ -26,6 +26,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 GATEWAY_URL="http://localhost:18789"
 ENV_FILE="$REPO_ROOT/docker/.env"
+CONTAINER=""  # Will be set when needed
+
+# Check required tools
+if ! command -v jq &> /dev/null; then
+    echo "Warning: jq not installed. Install with: sudo apt install jq"
+fi
+if ! command -v curl &> /dev/null; then
+    echo "Error: curl not installed. Install with: sudo apt install curl"
+    exit 1
+fi
 
 # =============================================================================
 # PRE-FLIGHT CHECKS
@@ -131,72 +141,148 @@ dispatch_to_supervisor() {
         return 1
     fi
     
-    # Create task file for Supervisor
-    local task_file="/tmp/supervisor-task-$task_id.md"
-    cat > "$task_file" << EOF
-# Supervisor Task
+    # Read spec files and create full prompt
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+    
+    SUPERVISOR_SPEC=$(cat "$REPO_ROOT/supervisor/SUPERVISOR_SPEC.md" 2>/dev/null || echo "")
+    WORKER_AUTH_SPEC=$(cat "$REPO_ROOT/workers/WORKER_AUTH.md" 2>/dev/null || echo "")
+    WORKER_REPORT_SPEC=$(cat "$REPO_ROOT/workers/WORKER_REPORT_SPEC.md" 2>/dev/null || echo "")
+    
+    # Create full prompt with specs
+    local prompt_file="/tmp/openclaw-prompt-$task_id.txt"
+    cat > "$prompt_file" << PROMPT_EOF
+You are the Supervisor of an AI agent system. Read the specs below and execute the task.
 
-Task ID: $task_id
-Timestamp: $(date -Iseconds)
-User Request: $task
+=== SUPERVISOR SPEC ===
+$SUPERVISOR_SPEC
 
-## Instructions
+=== WORKER AUTH SPEC ===
+$WORKER_AUTH_SPEC
 
-1. Read supervisor/SUPERVISOR_SPEC.md for your role
-2. Analyze this task
-3. Dispatch to appropriate Worker(s)
-4. Wait for Worker result
-5. Report back
+=== WORKER REPORT SPEC ===
+$WORKER_REPORT_SPEC
 
-EOF
-    
-    # Copy task file to container
-    docker cp "$task_file" "$CONTAINER:/home/node/.openclaw/workspace/"
-    
-    log_info "Task copied to container workspace"
+=== TASK ===
+$task
+
+=== INSTRUCTIONS ===
+1. Execute this task according to your spec
+2. Use browser automation if needed (VNC at http://localhost:6080)
+3. Write results to the appropriate result file
+4. If you need user action (login, approval), clearly state what you need and STOP
+5. Do NOT ask unnecessary questions - just execute
+
+BEGIN EXECUTION:
+PROMPT_EOF
+
+    log_info "Sending task to OpenClaw API..."
     echo ""
     
-    # Provide options for execution
-    echo "═══════════════════════════════════════════════════════════════════════"
-    echo ""
-    echo "Choose how to run the task:"
-    echo ""
-    echo "  Option 1: Web Interface (Recommended)"
-    echo "  ─────────────────────────────────────"
-    echo "  Open: http://localhost:18789"
-    echo "  Then paste this task:"
-    echo ""
-    echo "  $task"
-    echo ""
-    echo "  Option 2: Interactive CLI"
-    echo "  ─────────────────────────"
-    echo "  Run: docker exec -it $CONTAINER openclaw"
-    echo ""
-    echo "  Option 3: Direct API (curl)"
-    echo "  ────────────────────────────"
-    echo "  See: http://localhost:18789/api/docs"
-    echo ""
-    echo "═══════════════════════════════════════════════════════════════════════"
-    echo ""
+    # Send via OpenClaw API (conversation endpoint)
+    local response
+    response=$(curl -s -X POST "http://localhost:18789/api/conversation" \
+        -H "Content-Type: application/json" \
+        -d "{\"message\": $(cat "$prompt_file" | jq -Rs .)}" 2>&1)
     
-    read -p "Press Enter to open interactive CLI, or Ctrl+C to skip..."
-    echo ""
-    
-    # Start interactive CLI
-    log_info "Starting OpenClaw interactive mode..."
-    echo "Type your task and press Enter. Type 'exit' to quit."
-    echo ""
-    echo "─────────────────────────────────────────────"
-    
-    docker exec -it "$CONTAINER" openclaw || docker exec -it "$CONTAINER" npx openclaw
-    
-    echo "─────────────────────────────────────────────"
-    echo ""
+    if [ $? -ne 0 ]; then
+        log_warn "API call failed, falling back to CLI..."
+        # Copy prompt to container and use CLI
+        docker cp "$prompt_file" "$CONTAINER:/tmp/task-prompt.txt"
+        docker exec "$CONTAINER" sh -c "cat /tmp/task-prompt.txt | openclaw chat" &
+        TASK_PID=$!
+        
+        echo ""
+        echo "─────────────────────────────────────────────"
+        log_info "Task running in background (PID: $TASK_PID)"
+        log_info "Watch VNC at http://localhost:6080"
+        echo "─────────────────────────────────────────────"
+        echo ""
+        
+        # Wait and poll for results
+        poll_for_results "$task_id"
+    else
+        echo "$response" | jq -r '.response // .message // .error // .' 2>/dev/null || echo "$response"
+    fi
     
     # Cleanup
-    rm -f "$task_file"
+    rm -f "$prompt_file"
     
     # Check for result files
+    check_worker_results
+}
+
+poll_for_results() {
+    local task_id="$1"
+    local max_wait=300  # 5 minutes
+    local elapsed=0
+    local check_interval=5
+    
+    log_info "Polling for worker results..."
+    
+    while [ $elapsed -lt $max_wait ]; do
+        # Check if any result file exists
+        for result_file in "worker-auth-result.md" "worker-generate-code-result.md" "worker-publish-mcp-result.md"; do
+            if docker exec "$CONTAINER" test -f "/home/node/.openclaw/workspace/$result_file" 2>/dev/null; then
+                echo ""
+                log_success "Found result: $result_file"
+                echo ""
+                
+                # Read and parse result
+                local result
+                result=$(docker exec "$CONTAINER" cat "/home/node/.openclaw/workspace/$result_file")
+                echo "$result"
+                echo ""
+                
+                # Check status
+                local status
+                status=$(echo "$result" | grep -i "^status:" | head -1 | cut -d: -f2 | tr -d ' ')
+                
+                case "$status" in
+                    PASS)
+                        log_success "Task completed successfully!"
+                        return 0
+                        ;;
+                    REQUIRES_USER_ACTION)
+                        log_warn "User action required!"
+                        echo ""
+                        echo "The agent needs you to do something."
+                        echo "Check VNC at http://localhost:6080"
+                        echo ""
+                        read -p "Press Enter after completing the action..."
+                        # Reset and continue
+                        docker exec "$CONTAINER" rm -f "/home/node/.openclaw/workspace/$result_file"
+                        ;;
+                    BLOCKED)
+                        local blocker
+                        blocker=$(echo "$result" | grep -i "^blocker:" | cut -d: -f2-)
+                        log_warn "Task blocked: $blocker"
+                        local next_action
+                        next_action=$(echo "$result" | grep -i "^next_action:" | cut -d: -f2 | tr -d ' ')
+                        if [ "$next_action" = "CALL_AUTH" ]; then
+                            log_info "Calling Worker Auth..."
+                            dispatch_to_supervisor "Authenticate with GitHub"
+                        fi
+                        ;;
+                    FAILED)
+                        log_error "Task failed!"
+                        return 1
+                        ;;
+                esac
+            fi
+        done
+        
+        sleep $check_interval
+        elapsed=$((elapsed + check_interval))
+        printf "."
+    done
+    
+    echo ""
+    log_warn "Timeout waiting for results"
+    return 1
+}
+
+check_worker_results() {
     log_info "Checking for Worker results..."
     
     for result_file in "worker-auth-result.md" "worker-generate-code-result.md" "worker-publish-mcp-result.md"; do
@@ -225,20 +311,15 @@ test_auth() {
     check_vnc
     
     echo ""
-    log_info "This test will:"
-    echo "  1. Send task to Supervisor"
-    echo "  2. Supervisor dispatches to Worker Auth"
-    echo "  3. Worker Auth checks GitHub browser session"
-    echo "  4. Worker Auth writes AUTH/github.json"
-    echo "  5. Worker Auth writes worker-auth-result.md"
-    echo "  6. Supervisor reports result"
+    log_info "Auto-executing task..."
+    echo "  - Supervisor will dispatch to Worker Auth"
+    echo "  - Worker Auth checks GitHub browser session"  
+    echo "  - If login needed, script will pause and ask you to login via VNC"
     echo ""
     echo "Watch VNC at http://localhost:6080 to see browser"
     echo ""
-    read -p "Press Enter to start test..."
-    echo ""
     
-    dispatch_to_supervisor "Check if GitHub is authenticated. Verify the browser session and report the authentication status."
+    dispatch_to_supervisor "Check if GitHub is authenticated. Verify the browser session and report the authentication status. If not authenticated, open browser and ask user to login."
 }
 
 test_generate() {
@@ -252,14 +333,9 @@ test_generate() {
     check_gateway || return 1
     
     echo ""
-    log_info "This test will:"
-    echo "  1. Send task to Supervisor"
-    echo "  2. Supervisor dispatches to Worker Generate Code"
-    echo "  3. Worker generates a minimal MCP server"
-    echo "  4. Worker writes worker-generate-code-result.md"
-    echo "  5. Supervisor reports result"
-    echo ""
-    read -p "Press Enter to start test..."
+    log_info "Auto-executing task..."
+    echo "  - Supervisor dispatches to Worker Generate Code"
+    echo "  - Worker generates a minimal MCP server"
     echo ""
     
     dispatch_to_supervisor "Generate a simple MCP server called 'hello-test-mcp' with one tool named 'hello_test' that returns 'Hello from test MCP!'"
@@ -277,14 +353,10 @@ test_full_flow() {
     check_vnc
     
     echo ""
-    log_info "This test will run the full agent pipeline:"
-    echo "  1. Supervisor checks authentication (Worker Auth)"
-    echo "  2. Supervisor generates MCP project (Worker Generate Code)"
-    echo "  3. Supervisor publishes to GitHub (Worker Publish MCP)"
-    echo ""
-    log_warn "This is a comprehensive test and may take several minutes."
-    echo ""
-    read -p "Press Enter to start full flow test..."
+    log_info "Auto-executing full pipeline..."
+    echo "  - Auth → Generate → Publish"
+    echo "  - If login needed, script will pause at VNC"
+    log_warn "This may take several minutes."
     echo ""
     
     dispatch_to_supervisor "Create a simple MCP server called 'test-flow-mcp' with a 'hello' tool, then publish it to GitHub. First verify GitHub authentication."
