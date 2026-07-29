@@ -366,9 +366,10 @@ if [ "$API_CONFIGURED" = false ]; then
         echo "Choose provider:"
         echo "  1) Anthropic Claude (recommended)"
         echo "  2) OpenAI"
-        echo "  3) Skip for now"
+        echo "  3) DeepSeek"
+        echo "  4) Skip for now"
         echo ""
-        read -p "Enter choice [1-3]: " provider_choice
+        read -p "Enter choice [1-4]: " provider_choice
         
         case "$provider_choice" in
             1)
@@ -389,6 +390,18 @@ if [ "$API_CONFIGURED" = false ]; then
                     echo "OPENAI_API_KEY=$api_key" >> "$ENV_FILE"
                     echo "AGENT_PROVIDER=openai" >> "$ENV_FILE"
                     log_success "OpenAI API key saved to docker/.env"
+                fi
+                ;;
+            3)
+                read -p "Enter DeepSeek API key (sk-...): " api_key
+                if [ -n "$api_key" ]; then
+                    echo "" >> "$ENV_FILE"
+                    echo "# AI Model Configuration" >> "$ENV_FILE"
+                    echo "DEEPSEEK_API_KEY=$api_key" >> "$ENV_FILE"
+                    echo "DEEPSEEK_BASE_URL=https://api.deepseek.com" >> "$ENV_FILE"
+                    echo "DEEPSEEK_MODEL=deepseek-chat" >> "$ENV_FILE"
+                    echo "AGENT_PROVIDER=deepseek" >> "$ENV_FILE"
+                    log_success "DeepSeek API key saved to docker/.env"
                 fi
                 ;;
             *)

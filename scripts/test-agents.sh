@@ -61,6 +61,11 @@ check_api_key() {
         API_CONFIGURED=true
     fi
     
+    if [ -n "$DEEPSEEK_API_KEY" ] && [ "$DEEPSEEK_API_KEY" != "" ]; then
+        log_success "DeepSeek API key configured"
+        API_CONFIGURED=true
+    fi
+    
     if [ -n "$AZURE_OPENAI_API_KEY" ] && [ "$AZURE_OPENAI_API_KEY" != "" ]; then
         log_success "Azure OpenAI API key configured"
         API_CONFIGURED=true
@@ -72,6 +77,7 @@ check_api_key() {
         echo "Edit docker/.env and add one of:"
         echo "  ANTHROPIC_API_KEY=sk-ant-..."
         echo "  OPENAI_API_KEY=sk-..."
+        echo "  DEEPSEEK_API_KEY=sk-..."
         echo ""
         return 1
     fi

@@ -45,6 +45,18 @@ OPENAI_MODEL=gpt-4o
 AGENT_PROVIDER=openai
 ```
 
+### DeepSeek
+```
+DEEPSEEK_API_KEY=sk-...
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-chat
+AGENT_PROVIDER=deepseek
+```
+
+DeepSeek models:
+- `deepseek-chat` - General purpose chat model
+- `deepseek-coder` - Optimized for code tasks
+
 ### Local Models (Ollama)
 ```
 LOCAL_MODEL_URL=http://host.docker.internal:11434
