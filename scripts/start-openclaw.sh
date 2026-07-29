@@ -44,6 +44,13 @@ sudo service docker start >/dev/null 2>&1 || true
 
 echo "=== Starting OpenClaw ==="
 cd "$DOCKER_DIR"
+
+# First time: run onboard to create config
+if [ ! -f "$OPENCLAW_DIR/openclaw.mjs" ] || ! grep -q "gateway" "$OPENCLAW_DIR/openclaw.mjs" 2>/dev/null; then
+    echo "Running OpenClaw onboard (first time setup)..."
+    docker compose run --rm openclaw-gateway openclaw onboard --non-interactive --mode local || true
+fi
+
 docker compose up -d
 
 echo ""
