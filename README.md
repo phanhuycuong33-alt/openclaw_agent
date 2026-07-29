@@ -4,20 +4,45 @@ Multi-agent system for automated MCP server development and publishing.
 
 ## Quick Start (WSL)
 
+### Lần đầu tiên (Setup 1 lần)
+
 ```bash
-# 1. Clone the repository
+# 1. Clone repository
 git clone https://github.com/phanhuycuong33-alt/openclaw_agent.git
 cd openclaw_agent
 
-# 2. Run setup script (installs all dependencies)
-chmod +x scripts/setup-wsl.sh
+# 2. Run setup (cài Docker, Node, SSH, config API key)
+chmod +x scripts/*.sh
 ./scripts/setup-wsl.sh
 
-# 3. Verify environment
-./scripts/verify-environment.sh
-
-# 4. Start OpenClaw
+# 3. Start OpenClaw
 ./scripts/start-openclaw.sh
+
+# 4. Test agents
+./scripts/test-agents.sh
+```
+
+### Các lần sau (Daily use)
+
+```bash
+cd openclaw_agent
+
+# 1. Pull latest changes
+git pull
+
+# 2. Start OpenClaw  
+./scripts/start-openclaw.sh
+
+# 3. Test/Use agents
+./scripts/test-agents.sh        # Check environment
+./scripts/test-agents.sh auth   # Test GitHub auth
+./scripts/test-agents.sh cli    # Chat with Supervisor
+```
+
+### Dừng OpenClaw
+
+```bash
+cd docker && docker compose down
 ```
 
 ## What Gets Installed
@@ -33,6 +58,7 @@ The setup script automatically installs:
 | SSH keys | GitHub authentication |
 | Xvfb | Virtual display |
 | x11vnc | VNC server |
+| AI API Key | Anthropic/OpenAI for agents |
 
 ## Architecture
 
