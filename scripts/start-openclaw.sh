@@ -5,18 +5,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 DOCKER_DIR="$REPO_ROOT/docker"
 
-# Workspace directory
-WORKSPACE_DIR="${OPENCLAW_WORKSPACE_DIR:-$HOME/.openclaw/workspace}"
+# OpenClaw directories
+OPENCLAW_DIR="$HOME/.openclaw"
+WORKSPACE_DIR="$OPENCLAW_DIR/workspace"
 
-echo "=== Preparing workspace ==="
+echo "=== Preparing directories ==="
+mkdir -p "$OPENCLAW_DIR"
 mkdir -p "$WORKSPACE_DIR"
+mkdir -p "$WORKSPACE_DIR/AUTH"
 
 # Copy agent specs to workspace
 echo "Copying agent specs..."
 cp -r "$REPO_ROOT/supervisor" "$WORKSPACE_DIR/" 2>/dev/null || true
 cp -r "$REPO_ROOT/workers" "$WORKSPACE_DIR/" 2>/dev/null || true
 cp -r "$REPO_ROOT/config" "$WORKSPACE_DIR/" 2>/dev/null || true
-cp "$REPO_ROOT/openclaw.json" "$HOME/.openclaw/" 2>/dev/null || true
+cp "$REPO_ROOT/openclaw.json" "$OPENCLAW_DIR/" 2>/dev/null || true
+echo "Done"
 
 echo "=== Starting SSH agent ==="
 if [ -z "$SSH_AUTH_SOCK" ] || ! ssh-add -l >/dev/null 2>&1; then
