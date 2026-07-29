@@ -1,0 +1,59 @@
+{
+  "$schema": "https://openclaw.ai/schemas/config.json",
+  "version": "1.0",
+  "name": "OpenClaw Agent",
+  "description": "Multi-agent system for automated MCP server development",
+  
+  "agents": {
+    "supervisor": {
+      "name": "Supervisor",
+      "instructions": "supervisor/SUPERVISOR_SPEC.md",
+      "model": "default"
+    },
+    "auth": {
+      "name": "Worker Auth",
+      "instructions": "workers/WORKER_AUTH.md",
+      "model": "default"
+    },
+    "generate": {
+      "name": "Worker Generate Code",
+      "instructions": "workers/WORKER_GENERATE_CODE.md",
+      "model": "default"
+    },
+    "publish": {
+      "name": "Worker Publish MCP",
+      "instructions": "workers/WORKER_PUBLISH_MCP.md",
+      "model": "default"
+    }
+  },
+  
+  "defaults": {
+    "agent": "supervisor",
+    "model": {
+      "provider": "${AGENT_PROVIDER:-anthropic}",
+      "anthropic": {
+        "model": "claude-sonnet-4-20250514",
+        "apiKey": "${ANTHROPIC_API_KEY}"
+      },
+      "openai": {
+        "model": "gpt-4o",
+        "apiKey": "${OPENAI_API_KEY}"
+      },
+      "deepseek": {
+        "model": "${DEEPSEEK_MODEL:-deepseek-chat}",
+        "apiKey": "${DEEPSEEK_API_KEY}",
+        "baseUrl": "${DEEPSEEK_BASE_URL:-https://api.deepseek.com}"
+      }
+    }
+  },
+  
+  "workspace": {
+    "path": "${OPENCLAW_WORKSPACE_DIR:-~/.openclaw/workspace}",
+    "authDir": "AUTH"
+  },
+  
+  "browser": {
+    "display": ":99",
+    "headless": false
+  }
+}

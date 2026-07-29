@@ -52,6 +52,11 @@ services:
       - "${OPENCLAW_CONFIG_DIR:-${HOME:-/tmp}/.openclaw}:/home/node/.openclaw"
       - "${OPENCLAW_WORKSPACE_DIR:-${HOME:-/tmp}/.openclaw/workspace}:/home/node/.openclaw/workspace"
       - "${OPENCLAW_AUTH_PROFILE_SECRET_DIR:-${HOME:-/tmp}/.openclaw-auth-profile-secrets}:/home/node/.config/openclaw"
+      # Mount agent config and specs from repo
+      - "../openclaw.json:/home/node/.openclaw/openclaw.json:ro"
+      - "../supervisor:/home/node/.openclaw/workspace/supervisor:ro"
+      - "../workers:/home/node/.openclaw/workspace/workers:ro"
+      - "../config:/home/node/.openclaw/workspace/config:ro"
       ## Uncomment the lines below to enable sandbox isolation
       ## (agents.defaults.sandbox). Requires Docker CLI in the image
       ## (build with --build-arg OPENCLAW_INSTALL_DOCKER_CLI=1) or use
