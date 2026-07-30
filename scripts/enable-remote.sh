@@ -146,12 +146,21 @@ start_remote() {
     pkill -f "ngrok" 2>/dev/null || true
     sleep 1
     
-    # Create ngrok config for multiple tunnels
-    # Use temp directory to avoid path issues
-    local ngrok_tunnels_config="/tmp/openclaw-tunnels.yml"
+    log_info "Starting ngrok tunnels..."
+    log_info "  - SSH (TCP port 22)"
+    log_info "  - VNC (HTTP port 6080)"
+    log_info "  - Gateway (HTTP port 18789)"
+    echo ""
     
-    # Create the config file with tunnels
-    mkdir -p "$(dirname "$ngrok_tunnels_config")"
+    # Start ngrok tunnels in background
+    # Note: Each tunnel needs its own ngrok process OR use ngrok agent with config
+    # We'll start them with config file but with verbose output
+    
+    # Create ngrok config for multiple tunnels
+    local ngrok_config_dir="$HOME/.ngrok2"
+    mkdir -p "$ngrok_config_dir"
+    
+    local ngrok_tunnels_config="$ngrok_config_dir/openclaw-tunnels.yml"
     cat > "$ngrok_tunnels_config" << 'EOF'
 version: "2"
 tunnels:
@@ -166,35 +175,37 @@ tunnels:
     addr: 18789
 EOF
     
-    log_info "Tunnels config created at: $ngrok_tunnels_config"
+    log_info "Tunnels config: $ngrok_tunnels_config"
     
-    # Verify config file was created
-    if [ ! -f "$ngrok_tunnels_config" ]; then
-        log_error "Không thể tạo file config: $ngrok_tunnels_config"
-        return 1
-    fi
+    # Start ngrok - show output to help debug
+    log_info "Running: ngrok start --all --config $ngrok_tunnels_config"
+    echo ""
     
-    log_info "Starting ngrok tunnels..."
-    
-    # Start ngrok with all tunnels
-    # ngrok automatically loads auth config from ~/.ngrok2/ngrok.yml or ~/.config/ngrok/ngrok.yml
-    if ! ngrok start --all --config "$ngrok_tunnels_config" > /tmp/ngrok-start.log 2>&1 &
-    then
-        log_error "Không thể khởi động ngrok"
-        log_info "Debug log:"
-        tail -20 /tmp/ngrok-start.log
-        return 1
-    fi
-    
+    ngrok start --all --config "$ngrok_tunnels_config" &
     NGROK_PID=$!
     
     # Wait for ngrok to start
-    sleep 3
+    sleep 5
+    
+    # Check if ngrok started successfully
+    if ! kill -0 $NGROK_PID 2>/dev/null; then
+        log_error "Ngrok process died. Checking credentials..."
+        sleep 2
+        
+        # Show ngrok config status
+        log_info "Running: ngrok config check"
+        ngrok config check || true
+        
+        return 1
+    fi
+    
+    log_success "Ngrok process started (PID: $NGROK_PID)"
+    echo ""
     
     # Get tunnel info from ngrok API
     log_info "Getting tunnel information..."
     
-    local max_attempts=10
+    local max_attempts=15
     local attempt=0
     local tunnels_json=""
     
@@ -209,14 +220,38 @@ EOF
     
     if [ -z "$tunnels_json" ] || ! echo "$tunnels_json" | grep -q "public_url"; then
         log_error "Không thể lấy thông tin tunnel từ ngrok"
+        log_info "Raw response:"
+        echo "$tunnels_json"
+        echo ""
         log_info "Kiểm tra ngrok dashboard: http://localhost:4040"
+        log_info "Hoặc chạy: curl http://localhost:4040/api/tunnels"
         return 1
     fi
     
-    # Parse tunnel URLs
-    local ssh_url=$(echo "$tunnels_json" | jq -r '.tunnels[] | select(.name=="ssh") | .public_url' 2>/dev/null | sed 's|tcp://||')
-    local vnc_url=$(echo "$tunnels_json" | jq -r '.tunnels[] | select(.name=="vnc") | .public_url' 2>/dev/null)
-    local gateway_url=$(echo "$tunnels_json" | jq -r '.tunnels[] | select(.name=="gateway") | .public_url' 2>/dev/null)
+    # Parse tunnel URLs (with fallback if jq not available)
+    local ssh_url=""
+    local vnc_url=""
+    local gateway_url=""
+    
+    if command -v jq &> /dev/null; then
+        ssh_url=$(echo "$tunnels_json" | jq -r '.tunnels[] | select(.name=="ssh") | .public_url' 2>/dev/null | sed 's|tcp://||' | head -1)
+        vnc_url=$(echo "$tunnels_json" | jq -r '.tunnels[] | select(.name=="vnc") | .public_url' 2>/dev/null | head -1)
+        gateway_url=$(echo "$tunnels_json" | jq -r '.tunnels[] | select(.name=="gateway") | .public_url' 2>/dev/null | head -1)
+    else
+        log_warn "jq không được cài, dùng grep thay thế..."
+        # Fallback: try to extract URLs with grep
+        ssh_url=$(echo "$tunnels_json" | grep -o '"public_url":"[^"]*tcp[^"]*"' | head -1 | cut -d'"' -f4 | sed 's|tcp://||')
+        vnc_url=$(echo "$tunnels_json" | grep -o '"public_url":"https[^"]*"' | head -1 | cut -d'"' -f4)
+        gateway_url=$(echo "$tunnels_json" | grep -o '"public_url":"https[^"]*"' | tail -1 | cut -d'"' -f4)
+    fi
+    
+    # Fallback: if no named tunnels, use first available
+    if [ -z "$ssh_url" ] || [ -z "$vnc_url" ] || [ -z "$gateway_url" ]; then
+        log_warn "Không tìm thấy tất cả tunnel. Raw response:"
+        echo "$tunnels_json" | head -50
+        echo ""
+        log_warn "Có thể cấu hình tunnel config không khớp"
+    fi
     
     # Get current user
     local current_user=$(whoami)
@@ -282,6 +317,17 @@ EOF
     echo ""
     log_info "Lưu ý: Các URL này sẽ thay đổi mỗi lần restart"
     log_info "Để dừng: ./scripts/enable-remote.sh stop"
+    echo ""
+    
+    # Debug info
+    echo "┌─────────────────────────────────────────────────────────────────────┐"
+    echo "│  Debug Info                                                         │"
+    echo "├─────────────────────────────────────────────────────────────────────┤"
+    echo "│  Ngrok PID: $NGROK_PID"
+    echo "│  Check status: curl http://localhost:4040/api/tunnels | jq"
+    echo "│  Kill ngrok: kill $NGROK_PID"
+    echo "│  View logs: tail -f /var/log/ngrok.log"
+    echo "└─────────────────────────────────────────────────────────────────────┘"
     echo ""
     
     # Also show local network info
@@ -372,6 +418,57 @@ show_status() {
 }
 
 # =============================================================================
+# DEBUG
+# =============================================================================
+
+debug_ngrok() {
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════════════╗"
+    echo "║              Ngrok Configuration & Credential Check                   ║"
+    echo "╚═══════════════════════════════════════════════════════════════════════╝"
+    echo ""
+    
+    log_info "Checking ngrok installation..."
+    if command -v ngrok &> /dev/null; then
+        log_success "ngrok installed"
+        ngrok version
+    else
+        log_error "ngrok not found"
+        return 1
+    fi
+    
+    echo ""
+    log_info "Checking ngrok configuration..."
+    
+    if [ -f "$NGROK_CONFIG_V2" ]; then
+        log_success "Config found: $NGROK_CONFIG_V2"
+        echo "Content:"
+        head -20 "$NGROK_CONFIG_V2"
+    elif [ -f "$NGROK_CONFIG_V3" ]; then
+        log_success "Config found: $NGROK_CONFIG_V3"
+        echo "Content:"
+        head -20 "$NGROK_CONFIG_V3"
+    else
+        log_warn "No config file found"
+    fi
+    
+    echo ""
+    log_info "Running: ngrok config check"
+    ngrok config check || log_error "Config check failed"
+    
+    echo ""
+    log_info "Testing ngrok with simple tunnel..."
+    log_info "Running: ngrok http 8080 --log=stdout"
+    echo "(This will run for 5 seconds to test credentials)"
+    
+    timeout 5 ngrok http 8080 --log=stdout 2>&1 | head -30 || true
+    
+    echo ""
+    log_success "Debug check complete"
+    echo ""
+}
+
+# =============================================================================
 # QUICK CONNECT INFO (for mobile/other devices)
 # =============================================================================
 
@@ -429,12 +526,15 @@ show_help() {
     echo "  stop       Dừng remote access tunnels"
     echo "  status     Xem trạng thái"
     echo "  info       Hiển thị thông tin kết nối"
+    echo "  test       Test ngrok với đơn giản (chỉ HTTP port 80)"
+    echo "  debug      Kiểm tra ngrok config và credential"
     echo "  help       Hiển thị help"
     echo ""
     echo "Ví dụ:"
     echo "  ./scripts/enable-remote.sh install  # Lần đầu"
     echo "  ./scripts/enable-remote.sh start    # Bật remote access"
     echo "  ./scripts/enable-remote.sh info     # Lấy URL để kết nối"
+    echo "  ./scripts/enable-remote.sh debug    # Kiểm tra credential"
     echo ""
 }
 
@@ -453,6 +553,9 @@ case "${1:-help}" in
         ;;
     info)
         show_connect_info
+        ;;
+    debug)
+        debug_ngrok
         ;;
     help|--help|-h)
         show_help
