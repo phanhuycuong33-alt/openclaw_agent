@@ -298,7 +298,7 @@ run_agent() {
         echo ""
         
         # Use docker exec - this is the actual working method
-        cd "$DOCKER_DIR" || return 1
+        cd "$REPO_ROOT" || return 1
         
         # Execute agent with realtime output streaming
         echo "Step 1: Preparing prompt..."

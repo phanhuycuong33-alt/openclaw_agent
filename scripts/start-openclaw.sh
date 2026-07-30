@@ -76,7 +76,7 @@ echo ""
 
 log_info "Starting OpenClaw containers..."
 
-cd "$DOCKER_DIR"
+cd "$REPO_ROOT"
 
 # First time: run onboard to create config
 if [ ! -f "$OPENCLAW_DIR/openclaw.mjs" ] || ! grep -q "gateway" "$OPENCLAW_DIR/openclaw.mjs" 2>/dev/null; then
