@@ -145,6 +145,64 @@ show_tailscale_info() {
     log_info "Xem tất cả máy trong Tailscale: tailscale status"
     log_info "Quản lý: https://login.tailscale.com/"
     echo ""
+    
+    show_ssh_android
+}
+
+# =============================================================================
+# SSH FROM ANDROID (Works with Tailscale, Reverse Tunnel, Port Forward)
+# =============================================================================
+
+show_ssh_android() {
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════════════╗"
+    echo "║              SSH từ điện thoại Android                                ║"
+    echo "╚═══════════════════════════════════════════════════════════════════════╝"
+    echo ""
+    
+    log_success "Có, SSH từ Android được! 📱"
+    echo ""
+    
+    echo "Các SSH client phổ biến trên Android:"
+    echo "─────────────────────────────────────────────"
+    echo ""
+    
+    echo "1. Termux (Khuyến cáo) ⭐"
+    echo "   URL: https://termux.com/ hoặc F-Droid"
+    echo "   - Terminal đầy đủ, dùng OpenSSH native"
+    echo "   - Mã nguồn mở, miễn phí"
+    echo "   - Lệnh: pkg install openssh && ssh user@host"
+    echo ""
+    
+    echo "2. JuiceSSH (Đơn giản)"
+    echo "   URL: https://play.google.com/store/apps/details?id=com.sonelli.juicessh"
+    echo "   - UI đẹp, dễ dùng"
+    echo "   - Free version đủ dùng"
+    echo ""
+    
+    echo "3. Connectbot (Cổ điển)"
+    echo "   URL: https://play.google.com/store/apps/details?id=org.connectbot"
+    echo "   - Miễn phí, nhẹ"
+    echo "   - Tương thích tốt"
+    echo ""
+    
+    echo "4. Termius (Pro)"
+    echo "   URL: https://termius.com/"
+    echo "   - Premium features nhưng free version cũng ok"
+    echo "   - UI hiện đại"
+    echo ""
+    
+    echo "─────────────────────────────────────────────"
+    echo ""
+    
+    echo "🔴 KHUYẾN CÁO: Dùng Termux"
+    echo ""
+    echo "Lý do:"
+    echo "  - Mạnh nhất, terminal đầy đủ"
+    echo "  - Có package manager (apt)"
+    echo "  - Có thể cài thêm tool (vim, tmux, etc)"
+    echo "  - Mã nguồn mở"
+    echo ""
 }
 
 # =============================================================================
@@ -331,6 +389,7 @@ show_help() {
     echo "  reverse-tunnel  Setup SSH Reverse Tunnel (Need VPS)"
     echo "  port-forward    Setup Port Forwarding (Need Static IP)"
     echo "  compare         Xem so sánh các cách"
+    echo "  android         Hướng dẫn SSH từ điện thoại Android"
     echo "  help            Show this help"
     echo ""
     echo "Recommended: ./scripts/enable-direct-ssh.sh tailscale"
@@ -349,6 +408,9 @@ case "${1:-help}" in
         ;;
     compare)
         show_comparison
+        ;;
+    android)
+        show_ssh_android
         ;;
     help|--help|-h)
         show_help
