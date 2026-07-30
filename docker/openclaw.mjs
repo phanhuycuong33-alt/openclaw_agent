@@ -5,8 +5,10 @@ export default {
   "$schema": "https://openclaw.ai/config-schema.json",
   "gateway": {
     "mode": "local",
-    "bind": "lan",
-    "port": 18789
+    "bind": "localhost",
+    "hostname": "localhost",
+    "port": 18789,
+    "protocol": "http"
   },
   "browser": {
     "headless": false,

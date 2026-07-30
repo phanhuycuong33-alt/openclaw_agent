@@ -169,7 +169,7 @@ run_agent() {
     
     echo ""
     echo "╔═══════════════════════════════════════════════════════════════════════╗"
-    echo "║              OpenClaw Agent - Direct Execution                         ║"
+    echo "║              OpenClaw Agent - Direct Execution (No Crestodian Loop)   ║"
     echo "╚═══════════════════════════════════════════════════════════════════════╝"
     echo ""
     
@@ -185,28 +185,41 @@ run_agent() {
     echo "Task: $task_input"
     echo ""
     
-    log_info "Running agent in container..."
-    echo "Command: docker compose exec openclaw-cli node dist/index.js agent --message \"...\""
+    log_info "Sending to supervisor (HTTP API)..."
     echo ""
     
     echo "═══════════════════════════════════════════════════════════════════════"
     echo ""
     
-    # Run agent with message
-    cd "$DOCKER_DIR"
-    docker compose exec openclaw-cli node dist/index.js agent --message "$prompt" || true
+    # Send via HTTP API instead of interactive CLI (avoids Crestodian loop)
+    local api_response=$(curl -s -X POST "http://localhost:18789/api/conversation" \
+        -H "Content-Type: application/json" \
+        -d "{\"message\": $(echo "$prompt" | jq -Rs .)}" 2>&1)
+    
+    if [ -n "$api_response" ]; then
+        log_success "API Response:"
+        echo "$api_response" | jq -r '.response // .message // .' 2>/dev/null || echo "$api_response"
+    else
+        log_warn "No API response, trying Docker exec fallback..."
+        
+        # Fallback: Use docker exec with timeout to prevent loop
+        # (timeout prevents infinite Crestodian prompt)
+        timeout 120 docker compose exec openclaw-cli node dist/index.js agent \
+            --message "$prompt" 2>&1 | head -100 || true
+    fi
     
     echo ""
     echo "═══════════════════════════════════════════════════════════════════════"
     echo ""
     
-    log_success "Agent execution complete"
+    log_success "Agent execution sent"
     echo ""
     
-    log_info "Check results:"
-    echo "  Result files: ~/.openclaw/workspace/worker-*-result.md"
-    echo "  View logs: docker compose logs -f openclaw-gateway"
-    echo "  Check VNC: http://localhost:6080"
+    log_info "Next steps:"
+    echo "  1. Wait for worker to process (usually 10-30 seconds)"
+    echo "  2. Check results: cat ~/.openclaw/workspace/worker-*-result.md"
+    echo "  3. View logs: docker compose logs -f openclaw-gateway"
+    echo "  4. See browser: http://localhost:6080 (VNC)"
     echo ""
 }
 

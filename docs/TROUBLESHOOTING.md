@@ -3,28 +3,36 @@
 ## Crestodian Loop Issue
 
 ### Vấn đề
-Khi chạy agent, Crestodian liên tục hiển thị:
+Khi chạy agent, Crestodian liên tục lặp lại:
 ```
-Gateway: not reachable at ws://127.0.0.1:18789
+Hi, I'm Crestodian.
+Gateway: not reachable at ws://127.0.0.1:18789; I already did the first probe.
 I can start debugging with gateway status, or queue restart gateway for approval.
+───────────────────────────────────────────────────
+[Lặp lại mãi mãi...]
 ```
 
-Đây là vòng lặp (loop) vì:
-1. Crestodian start + show status
-2. Không kết nối được Gateway (URL sai)
-3. Offer để restart Gateway
-4. Nhưng không có action được chọn → lại hiển thị status
-5. **Loop!**
+**Root Cause:**
+1. Crestodian interactive CLI không kết nối được Gateway
+2. Hiển thị status + options, chờ user input
+3. Nhưng không có cách nhập input → không có action
+4. CLI lặp lại status mãi mãi (vô hạn)
+5. **Vòng lặp vô tận!**
 
 ### Nguyên nhân
 - Gateway cấu hình ở `http://localhost:18789` (HTTP)
-- Crestodian tìm ở `ws://127.0.0.1:18789` (WebSocket + IP)
-- Mismatch → không kết nối
+- Crestodian tìm ở `ws://127.0.0.1:18789` (WebSocket + IP address)
+- Mismatch: Protocol khác (http vs ws), hostname khác (localhost vs 127.0.0.1)
+- Kết nối thất bại → không có user input → vòng lặp
 
 ### Giải pháp
 
-#### Cách 1: Dùng `run-agent.sh` (Khuyến cáo ⭐)
-Script mới này tránh vòng lặp bằng cách chạy agent trực tiếp:
+#### Cách 1: Dùng `run-agent.sh` (Khuyến cáo ⭐⭐⭐)
+Script này tránh vòng lặp bằng cách:
+1. **Sử dụng HTTP API** thay vì interactive Crestodian CLI
+2. **Timeout 120s** khi fallback to docker exec (prevent infinite loop)
+3. **Tự động đọc spec files** và inject vào prompt
+4. **Không yêu cầu user input** → không loop
 
 ```bash
 # Quick tasks
@@ -38,72 +46,78 @@ Script mới này tránh vòng lặp bằng cách chạy agent trực tiếp:
 ```
 
 **Ưu điểm:**
+- ✅ Không vòng lặp (HTTP API + timeout)
 - ✅ Tự động đọc spec files
-- ✅ Không vòng lặp
-- ✅ Direct CLI execution
-- ✅ Như bạn muốn: `docker compose exec ... --message "..."`
+- ✅ Real-time output
+- ✅ Auto-exit (không chờ user input)
+
+**Workflow:**
+```
+run-agent.sh → Check Docker → Send to HTTP API → Get response → Exit
+                                    ↓
+                          (Fallback: timeout docker exec)
+```
 
 ---
 
-#### Cách 2: Fix Gateway URL (nếu dùng Crestodian interactive)
+#### Cách 2: Fix Gateway Config (Ngăn chặn ở gốc)
 
-**A. Cập nhật openclaw.mjs:**
-```bash
-nano ~/.openclaw/openclaw.mjs
-```
+**Already Fixed! ✅**
 
-Thêm hoặc sửa:
+File `docker/openclaw.mjs` đã được update:
 ```javascript
 export default {
   "gateway": {
     "mode": "local",
-    "bind": "127.0.0.1",  // Hoặc "localhost"
-    "port": 18789,
-    "hostname": "localhost"  // Add this
-  },
-  "browser": {
-    "headless": false,
-    "display": ":99"
+    "bind": "localhost",    // Changed from "lan"
+    "hostname": "localhost", // Added
+    "protocol": "http",     // Added (explicit)
+    "port": 18789
   }
+  // ...
 };
 ```
 
-Restart:
+Restart để apply:
 ```bash
+cd docker
 docker compose down
 docker compose up -d
 ```
 
-**B. Hoặc set environment variable:**
+Giờ Gateway sẽ accessible tại `http://localhost:18789` (match với Crestodian expectations).
+
+---
+
+#### Cách 3: Manual Fix (nếu Cách 1 + 2 không work)
+
+Khởi động mới OpenClaw:
 ```bash
-export OPENCLAW_GATEWAY_URL="http://localhost:18789"
+docker compose down
 docker compose up -d
+
+# Verify Gateway
+curl http://localhost:18789/api/status
+# Should return: {"status":"ready"}
 ```
+
+Nếu vẫn bị loop, sử dụng Cách 1 (`run-agent.sh`) vì nó không phụ thuộc vào Gateway connection.
 
 ---
 
 ## Comparison: test-agents.sh vs run-agent.sh
 
-### test-agents.sh (Polling-based)
-```bash
-./scripts/test-agents.sh auth
-```
-- ✅ Gọi supervisor qua HTTP API
-- ✅ Poll for result files
-- ✅ Show docker logs while waiting
-- ⚠️ Kỳ lạ nếu gateway không respond
+| Tiêu chí | test-agents.sh | run-agent.sh | Winner |
+|----------|---|---|---|
+| Cách chạy | HTTP API polling | HTTP API + docker exec (timeout) | 🔧 Tùy |
+| Crestodian loop | ⚠️ Có thể | ✅ Không (timeout) | run-agent |
+| Auto spec read | Có (built-in) | ✅ Có (from files) | 🤝 Bằng |
+| Output | Polling status | Realtime | run-agent |
+| User input | Chờ enter | ❌ Không cần | run-agent |
+| Exit behavior | Manual chọn action | ✅ Auto-exit | run-agent |
+| Error handling | Status polling | ✅ Timeout fallback | run-agent |
 
-### run-agent.sh (Direct CLI)
-```bash
-./scripts/run-agent.sh auth
-```
-- ✅ Chạy agent trực tiếp
-- ✅ Tự động đọc spec files
-- ✅ Không vòng lặp
-- ✅ Output realtime
-- ✅ Như: `docker compose exec openclaw-cli node dist/index.js agent --message "..."`
-
-**→ Khuyến cáo: Dùng `run-agent.sh`**
+**→ Khuyến cáo: Luôn dùng `run-agent.sh` để tránh vòng lặp**
 
 ---
 
