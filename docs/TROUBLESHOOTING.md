@@ -161,35 +161,36 @@ docker compose exec openclaw-cli node dist/index.js agent --message "đọc spec
 
 ## Is Agent Actually Working?
 
-### What You'll See
+### What You'll See (Realtime)
 ```bash
 $ ./scripts/run-agent.sh auth
 
 [INFO] Waiting for containers to reach healthy state...
 [OK] Gateway is healthy: openclaw-gateway: Up 20s (healthy)
 [INFO] Sending to supervisor (HTTP API)...
-[OK] API response: Not found        ← This is NORMAL! Don't worry
+[OK] API response: Not found        ← This is NORMAL!
 [INFO] Using direct CLI execution (docker exec)...
+[INFO] Streaming output realtime...
 
-[Agent output... might be long or empty]
-
+Hi, I'm Crestodian.
+- Using: deepseek/deepseek-v4-flash
+- Config: valid. Default agent: main
+...
+[Agent output... REALTIME! See it as it happens]
+...
 [OK] Agent execution complete
-
-How to verify it worked:
-  Option 1: Check result files (BEST)
-    $ ls -la ~/.openclaw/workspace/worker-*-result.md
 ```
 
-**"API response: Not found" is NORMAL** - means HTTP API not available, script falls back to docker exec (which is better anyway).
+**Key:** Output is REALTIME - you see agent working as it happens, not waiting 30s later.
 
 ---
 
-## Verify Agent Actually Ran
+## Verify Agent Ran Successfully
 
 ### Best Method: Check Result Files
 ```bash
-# List results
-ls -la ~/.openclaw/workspace/worker-*-result.md
+# After agent output finishes, check results
+ls ~/.openclaw/workspace/worker-*-result.md
 
 # View result
 cat ~/.openclaw/workspace/worker-auth-result.md
@@ -200,57 +201,56 @@ cat ~/.openclaw/workspace/worker-auth-result.md
 # Result: Successfully authenticated as username
 ```
 
-### Real-time Monitoring: VNC Browser
+### Realtime Monitoring: VNC Browser
 ```bash
-# Open in browser
+# Open while agent is running
 http://localhost:6080
 
 # You'll see:
 # - Agent opening Firefox/Chrome
-# - Navigating to GitHub
-# - Logging in
-# - Writing results
+# - Navigating to websites
+# - Performing actions
+# - Results being written
 ```
 
-### Debug: Check Logs
+### Debug: Check Logs (while running)
 ```bash
-# View gateway logs (before running agent)
-docker logs -f openclaw-gateway
+# In another terminal
+docker compose logs -f
 
-# Run agent (in another terminal)
-./scripts/run-agent.sh auth
-
-# Watch logs update with agent activity
+# Watch realtime updates as agent works
 ```
 
 ---
 
-## Common Output
+## Common Scenarios
 
-### ✅ SUCCESS
+### ✅ SUCCESS - Normal
 ```
-[INFO] Using direct CLI execution (docker exec)...
-[Output from agent...]
-[OK] Agent execution complete
-
-$ cat ~/.openclaw/workspace/worker-auth-result.md
+[Agent runs, output streams...]
 Status: PASS
+[OK] Agent execution complete
+$ cat result-file
+→ Shows successful result
 ```
 
-### ⚠️ TIMEOUT (But Still Working!)
+### ⚠️ SLOW - Agent Still Processing
 ```
-[WARN] Execution timed out (120s) - agent is still processing in background
+[Agent runs for 2-3 minutes...]
+[WARN] Execution timed out (180s) - agent is still processing in background
+(This is normal for longer tasks)
 
-→ Agent is still running, check results in 30 seconds
-→ Don't restart - let it finish
+→ Agent still running, results will appear eventually
+→ Check result file in a minute or two
 ```
 
-### ❌ ERROR
+### ❌ ERROR - Something Failed
 ```
+[Agent runs, fails...]
 [ERROR] Agent execution failed with exit code 1
-[Error output...]
 
 → Check logs: docker compose logs
+→ Check stderr output above
 → Restart: docker compose restart
 ```
 

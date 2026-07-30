@@ -266,29 +266,27 @@ run_agent() {
     else
         # API failed or not available, use docker exec (preferred method)
         log_info "Using direct CLI execution (docker exec)..."
+        log_info "Streaming output realtime..."
         echo ""
         
         # Use docker exec - this is the actual working method
         cd "$DOCKER_DIR" || return 1
         
-        # Execute agent and capture result
-        local agent_output
-        agent_output=$(timeout 120 docker compose exec -T openclaw-cli node dist/index.js agent \
-            --message "$prompt" 2>&1) || {
+        # Execute agent with realtime output streaming (no capture)
+        # Show output as it happens, with timeout as safety net
+        timeout 180 docker compose exec -T openclaw-cli node dist/index.js agent \
+            --message "$prompt" 2>&1 || {
             local exit_code=$?
             if [ $exit_code -eq 124 ]; then
-                log_warn "Execution timed out (120s) - agent is still processing in background"
+                echo ""
+                log_warn "Execution timed out (180s) - agent is still processing in background"
+                echo "  (This is normal for longer tasks)"
             elif [ $exit_code -ne 0 ]; then
+                echo ""
                 log_error "Agent execution failed with exit code $exit_code"
-                echo "$agent_output" | tail -20
                 return 1
             fi
         }
-        
-        # Show last part of output
-        if [ -n "$agent_output" ]; then
-            echo "$agent_output" | tail -50
-        fi
     fi
     
     echo ""
@@ -298,22 +296,18 @@ run_agent() {
     log_success "Agent execution complete"
     echo ""
     
-    log_info "How to verify it worked:"
+    log_info "Monitor ongoing work:"
     echo ""
-    echo "  Option 1: Check result files (BEST)"
-    echo "    $ ls -la ~/.openclaw/workspace/worker-*-result.md"
+    echo "  Option 1: Check result files (if task finished)"
+    echo "    $ ls ~/.openclaw/workspace/worker-*-result.md"
     echo "    $ cat ~/.openclaw/workspace/worker-auth-result.md"
     echo ""
-    echo "  Option 2: View browser activity (REALTIME)"
-    echo "    → Open: http://localhost:6080 (VNC)"
-    echo "    → Watch agent working in real-time"
+    echo "  Option 2: View browser in realtime (VNC)"
+    echo "    → Open: http://localhost:6080"
+    echo "    → Watch agent working"
     echo ""
-    echo "  Option 3: Check logs (DEBUG)"
-    echo "    $ docker compose logs -f openclaw-gateway"
-    echo ""
-    
-    log_info "Status: Agent is running in background"
-    echo "  Wait 10-30 seconds for results..."
+    echo "  Option 3: View logs (DEBUG)"
+    echo "    $ docker compose logs -f"
     echo ""
 }
 

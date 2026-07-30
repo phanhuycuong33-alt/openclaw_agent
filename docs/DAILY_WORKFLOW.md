@@ -82,10 +82,11 @@ docker ps --format "table {{.Names}}\t{{.Status}}"
 ### Bước 5: Chạy agents (NEW - khuyến cáo)
 ```bash
 # ⭐⭐⭐ RECOMMENDED: Dùng run-agent.sh
-# Tự động chờ healthy state + đọc specs
+# Output streams REALTIME - xem nó chạy ngay tức thì!
 
 # Test auth (check GitHub login)
 ./scripts/run-agent.sh auth
+# Output sẽ hiển thị realtime, không cần chờ
 
 # Test generate (create MCP server)
 ./scripts/run-agent.sh generate
@@ -100,16 +101,17 @@ docker ps --format "table {{.Names}}\t{{.Status}}"
 # ./scripts/test-agents.sh auth
 ```
 
-### Bước 6: Verify it worked
+### Bước 6: Xem kết quả (While/After Agent Running)
 ```bash
-# BEST: Check result files (wait 10-30 seconds after running agent)
-cat ~/.openclaw/workspace/worker-auth-result.md
-
-# REALTIME: Open VNC to watch browser
+# Option 1: REALTIME - Xem browser
 http://localhost:6080
+# Xem agent mở Firefox, login, làm việc, etc
 
-# DEBUG: View logs
+# Option 2: Check logs (debug)
 docker compose logs -f
+
+# Option 3: Check result files (after finished)
+cat ~/.openclaw/workspace/worker-auth-result.md
 ```
 
 ---
