@@ -24,8 +24,25 @@ log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-NGROK_CONFIG="$HOME/.ngrok2/ngrok.yml"
+# Support both ngrok v2 and v3+ config paths
+NGROK_CONFIG_V2="$HOME/.ngrok2/ngrok.yml"
+NGROK_CONFIG_V3="$HOME/.config/ngrok/ngrok.yml"
 TUNNEL_INFO_FILE="$REPO_ROOT/.remote-access.txt"
+
+# Helper to check if ngrok is properly configured
+check_ngrok_auth() {
+    if [ -f "$NGROK_CONFIG_V2" ] && grep -q "authtoken" "$NGROK_CONFIG_V2" 2>/dev/null; then
+        return 0
+    fi
+    if [ -f "$NGROK_CONFIG_V3" ] && grep -q "authtoken" "$NGROK_CONFIG_V3" 2>/dev/null; then
+        return 0
+    fi
+    # Try to verify with ngrok command
+    if ngrok config check &>/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
+}
 
 # =============================================================================
 # INSTALLATION
@@ -67,7 +84,7 @@ install_dependencies() {
     echo ""
     
     # Check if ngrok is configured
-    if [ ! -f "$NGROK_CONFIG" ] || ! grep -q "authtoken" "$NGROK_CONFIG" 2>/dev/null; then
+    if ! check_ngrok_auth; then
         echo "═══════════════════════════════════════════════════════════════════════"
         echo ""
         log_warn "ngrok chưa được cấu hình!"
@@ -78,11 +95,19 @@ install_dependencies() {
         echo "  3. Chạy lệnh: ngrok config add-authtoken YOUR_TOKEN"
         echo ""
         echo "═══════════════════════════════════════════════════════════════════════"
+        echo ""
         
         read -p "Nhập ngrok authtoken (hoặc Enter để bỏ qua): " NGROK_TOKEN
         if [ -n "$NGROK_TOKEN" ]; then
             ngrok config add-authtoken "$NGROK_TOKEN"
-            log_success "ngrok đã được cấu hình!"
+            sleep 1
+            
+            # Verify authtoken was set
+            if check_ngrok_auth; then
+                log_success "ngrok đã được cấu hình!"
+            else
+                log_error "Không thể xác nhận authtoken. Vui lòng thử lại."
+            fi
         fi
     else
         log_success "ngrok đã được cấu hình"
@@ -107,8 +132,9 @@ start_remote() {
     fi
     
     # Check ngrok auth
-    if [ ! -f "$NGROK_CONFIG" ] || ! grep -q "authtoken" "$NGROK_CONFIG" 2>/dev/null; then
+    if ! check_ngrok_auth; then
         log_error "ngrok chưa được cấu hình. Chạy: ./scripts/enable-remote.sh install"
+        log_info "Nếu đã cấu hình, thử chạy: ngrok config check"
         return 1
     fi
     
@@ -139,7 +165,8 @@ EOF
     log_info "Starting ngrok tunnels..."
     
     # Start ngrok with all tunnels
-    ngrok start --all --config "$NGROK_CONFIG" --config "$ngrok_tunnels_config" > /dev/null 2>&1 &
+    # ngrok automatically loads config from ~/.ngrok2/ngrok.yml or ~/.config/ngrok/ngrok.yml
+    ngrok start --all --config "$ngrok_tunnels_config" > /dev/null 2>&1 &
     NGROK_PID=$!
     
     # Wait for ngrok to start
