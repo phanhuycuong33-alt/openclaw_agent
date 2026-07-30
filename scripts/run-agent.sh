@@ -38,12 +38,60 @@ check_docker() {
     fi
 }
 
+wait_for_healthy() {
+    local max_attempts=30  # 30 * 2 = 60 seconds max wait
+    local attempt=0
+    
+    log_info "Waiting for containers to reach healthy state..."
+    
+    while [ $attempt -lt $max_attempts ]; do
+        # Check if at least gateway is healthy or running
+        local status=$(docker ps --format "{{.Names}}: {{.Status}}" | grep openclaw-gateway | head -1 || true)
+        
+        if echo "$status" | grep -q "(healthy)"; then
+            log_success "Gateway is healthy: $status"
+            return 0
+        fi
+        
+        if echo "$status" | grep -q "Up"; then
+            # Container is up but might still be starting
+            local elapsed=$((attempt * 2))
+            if [ $elapsed -gt 10 ]; then
+                # If up for more than 10 seconds, consider it ready enough
+                log_success "Gateway is running: $status"
+                return 0
+            fi
+        fi
+        
+        # Show progress
+        if [ $((attempt % 3)) -eq 0 ]; then
+            local progress=$((attempt * 2))
+            echo -ne "  ⏳ Waiting for health... (${progress}s)    \r"
+        fi
+        
+        sleep 2
+        ((attempt++))
+    done
+    
+    # Even if not healthy, if containers are running, proceed
+    local status=$(docker ps --format "{{.Names}}: {{.Status}}" | grep openclaw-gateway || true)
+    if [ -n "$status" ]; then
+        log_warn "Containers running but health status unknown. Proceeding anyway..."
+        return 0
+    fi
+    
+    return 1
+}
+
 check_gateway() {
     if ! docker ps | grep -q "openclaw"; then
         log_error "OpenClaw containers not running"
         log_info "Start with: ./scripts/start-openclaw.sh"
         return 1
     fi
+    
+    # Wait for healthy state
+    wait_for_healthy || return 1
 }
 
 # =============================================================================

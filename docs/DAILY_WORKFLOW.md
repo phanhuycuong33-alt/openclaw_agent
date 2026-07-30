@@ -13,14 +13,12 @@ cd ~/openclaw_agent
 
 # 3. Khởi động OpenClaw (Docker containers)
 ./scripts/start-openclaw.sh
+# ⏳ Chờ cho tới khi thấy: [OK] Containers healthy
 
-# 4. Chờ containers chạy (~30 giây)
-# → Xem logs
-
-# 5. Test agents
-./scripts/test-agents.sh auth
-# hoặc: ./scripts/test-agents.sh generate
-# hoặc: ./scripts/test-agents.sh full-flow
+# 4. Chạy agent (tự động chờ healthy state)
+./scripts/run-agent.sh auth
+# hoặc: ./scripts/run-agent.sh generate
+# hoặc: ./scripts/run-agent.sh full-flow
 ```
 
 ---
@@ -52,40 +50,54 @@ cd ~/openclaw_agent && git pull
 **Script sẽ:**
 - ✅ Kiểm tra .env file (AI API key)
 - ✅ Chạy `docker compose up -d`
+- ✅ **Chờ cho containers healthy** (tự động, không cần manual)
 - ✅ Chạy `openclaw onboard` nếu lần đầu
 - ✅ Hiển thị ports + URLs
 
 **Output ví dụ:**
 ```
-[INFO] Starting OpenClaw containers...
-[OK] OpenClaw Gateway: http://localhost:18789
-[OK] VNC Browser: http://localhost:6080
-[OK] Containers: openclaw-gateway, openclaw-ssh
+[INFO] Waiting for containers to reach healthy state...
+⏳ Waiting... (0s elapsed)
+[OK] Containers healthy: openclaw-gateway: Up 20s (healthy)
+
+[OK] OpenClaw is Ready! 🚀
 ```
 
 ### Bước 4: Chờ containers chạy
 ```bash
-# Kiểm tra containers
-docker ps
+# Script đã tự động chờ healthy state, nhưng có thể kiểm tra lại
+docker ps --format "table {{.Names}}\t{{.Status}}"
 
-# Xem logs
-docker logs -f openclaw-gateway
-# Ctrl+C để exit
+# Tìm kiếm "(healthy)" - nếu thấy = ready
+# Nếu thấy "(health: starting)" = vẫn khởi động, chờ chút nữa
 ```
 
-### Bước 5: Test agents
+**3 trạng thái:**
+```
+1. Up 5s (health: starting)   ← Chờ chút nữa
+2. Up 10s (health: starting)  ← Sắp xong
+3. Up 20s (healthy)           ← Ready! ✅
+```
+
+### Bước 5: Chạy agents (NEW - khuyến cáo)
 ```bash
+# ⭐⭐⭐ RECOMMENDED: Dùng run-agent.sh
+# Tự động chờ healthy state + đọc specs
+
 # Test auth (check GitHub login)
-./scripts/test-agents.sh auth
+./scripts/run-agent.sh auth
 
 # Test generate (create MCP server)
-./scripts/test-agents.sh generate
+./scripts/run-agent.sh generate
 
 # Full flow (auth → generate → publish)
-./scripts/test-agents.sh full-flow
+./scripts/run-agent.sh full-flow
 
-# Quick check (environment)
-./scripts/test-agents.sh quick-check
+# Custom task
+./scripts/run-agent.sh "mô tả task của bạn"
+
+# ⚠️ OLD (Polling-based, có thể loop):
+# ./scripts/test-agents.sh auth
 ```
 
 ---

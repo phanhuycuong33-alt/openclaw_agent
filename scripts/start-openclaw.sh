@@ -89,8 +89,41 @@ fi
 docker compose up -d
 
 # Wait for containers to be ready
-log_info "Waiting for containers to be ready..."
-sleep 5
+log_info "Waiting for containers to reach healthy state..."
+
+wait_for_health() {
+    local max_attempts=60  # 60 * 2 = 120 seconds max wait
+    local attempt=0
+    local healthy_count=0
+    local target_count=3   # gateway, cli, ssh
+    
+    while [ $attempt -lt $max_attempts ]; do
+        # Check health status
+        local status=$(docker ps --format "{{.Names}}: {{.Status}}" | grep openclaw || true)
+        healthy_count=$(echo "$status" | grep -c "(healthy)" || true)
+        
+        if [ "$healthy_count" -ge 1 ]; then
+            # At least one container healthy
+            log_success "Containers healthy: $status"
+            return 0
+        fi
+        
+        # Show current status
+        if [ $((attempt % 5)) -eq 0 ]; then
+            local progress=$((attempt * 2))
+            echo -ne "  ⏳ Waiting... (${progress}s elapsed)    \r"
+        fi
+        
+        sleep 2
+        ((attempt++))
+    done
+    
+    log_warn "Timeout waiting for healthy status, but containers may still be functional"
+    return 0
+}
+
+wait_for_health
+sleep 2
 
 # Check container status
 echo ""

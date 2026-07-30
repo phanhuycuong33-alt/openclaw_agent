@@ -252,25 +252,49 @@ node dist/index.js agent
 
 ### Morning Startup
 ```bash
+# 1. Start containers (waits for healthy state automatically)
 ./scripts/start-openclaw.sh
 
-# Check status
-docker ps
+# Output:
+# [INFO] Waiting for containers to reach healthy state...
+# ⏳ Waiting... (0s elapsed)
+# [OK] Containers healthy: openclaw-gateway: Up 12s (healthy), openclaw-cli: Up 10s
+```
+
+### Wait for Healthy State
+**Important:** Containers have 3 states:
+```
+1. health: starting  ← Cannot use agent yet (container still initializing)
+2. health: starting  ← Wait...
+3. health: healthy   ← Ready! ✅ Can run agent now
+```
+
+If you see `health: starting`, **wait a bit more** (usually 10-30 seconds).
+
+Check status:
+```bash
+docker ps --format "table {{.Names}}\t{{.Status}}"
+
+# OUTPUT (need to wait):
+# NAME              STATUS
+# openclaw-gateway  Up 5s (health: starting)
+# openclaw-cli      Up 4s (health: starting)
+
+# OUTPUT (ready):
+# NAME              STATUS
+# openclaw-gateway  Up 20s (healthy)
+# openclaw-cli      Up 18s (healthy)
 ```
 
 ### Test Agents (New way with run-agent.sh)
 ```bash
-# Option 1: Quick test
-./scripts/run-agent.sh auth
-
-# Option 2: Generate + Publish
-./scripts/run-agent.sh generate
+# run-agent.sh automatically waits for healthy state
+./scripts/run-agent.sh auth       # Auto waits + spec reading
+./scripts/run-agent.sh generate   # ...
 ./scripts/run-agent.sh publish
-
-# Option 3: Full flow
 ./scripts/run-agent.sh full-flow
 
-# Option 4: Custom task (auto-spec reading)
+# Custom task (auto-spec reading)
 ./scripts/run-agent.sh "your task here"
 ```
 
@@ -281,6 +305,9 @@ docker compose logs -f
 
 # Check result files
 cat ~/.openclaw/workspace/worker-auth-result.md
+
+# Check container health
+docker ps --format "table {{.Names}}\t{{.Status}}"
 ```
 
 ### Shutdown
