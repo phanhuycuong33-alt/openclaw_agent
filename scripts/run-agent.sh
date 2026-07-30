@@ -34,6 +34,13 @@ DOCKER_DIR="$REPO_ROOT/docker"
 check_docker() {
     if ! docker ps >/dev/null 2>&1; then
         log_error "Docker is not running"
+        log_info "Try: sudo service docker start"
+        return 1
+    fi
+    
+    # Additional check: verify docker compose works
+    if ! docker compose version >/dev/null 2>&1; then
+        log_error "Docker Compose is not available"
         return 1
     fi
 }
@@ -107,6 +114,24 @@ check_results() {
     fi
     
     return 1
+}
+
+# Pre-check: Verify container is responsive
+verify_container_responsive() {
+    log_info "Verifying container is responsive..."
+    
+    # Try simple echo command
+    if docker compose exec -T openclaw-cli echo "container ok" >/dev/null 2>&1; then
+        log_success "Container is responsive"
+        return 0
+    else
+        log_error "Container not responding to exec commands"
+        log_info "Checking container status:"
+        docker ps --format "table {{.Names}}\t{{.Status}}" | grep openclaw || true
+        
+        log_info "Try: docker compose restart"
+        return 1
+    fi
 }
 
 # =============================================================================
@@ -242,6 +267,10 @@ run_agent() {
     log_success "Checks passed"
     echo ""
     
+    log_info "Verifying container responsiveness..."
+    verify_container_responsive || return 1
+    echo ""
+    
     log_info "Building prompt with specs..."
     local prompt=$(build_prompt "$task")
     
@@ -272,8 +301,13 @@ run_agent() {
         cd "$DOCKER_DIR" || return 1
         
         # Execute agent with realtime output streaming
-        # Show output as it happens using tee (for realtime + error detection)
-        echo "Running: docker compose exec openclaw-cli node dist/index.js agent --message \"...\""
+        echo "Step 1: Preparing prompt..."
+        local prompt_len=${#prompt}
+        echo "  Prompt size: $prompt_len bytes"
+        echo ""
+        
+        echo "Step 2: Executing docker compose exec..."
+        echo "  Command: docker compose exec -T openclaw-cli node dist/index.js agent --message \"...\""
         echo ""
         echo "─────────────────────────────────────────────────────────────────────"
         echo ""
@@ -282,28 +316,39 @@ run_agent() {
         local output_file="/tmp/openclaw-output-$$.txt"
         local exit_code=0
         
+        log_info "⏳ Agent running... (timeout 60s)"
+        echo ""
+        
         # Use tee to stream output AND save to file, with timeout
         timeout 60 docker compose exec -T openclaw-cli node dist/index.js agent \
             --message "$prompt" 2>&1 | tee "$output_file" || exit_code=$?
         
+        local docker_exit=$?
         echo ""
         echo "─────────────────────────────────────────────────────────────────────"
         echo ""
         
         # Handle exit codes
-        if [ $exit_code -eq 124 ]; then
+        if [ $exit_code -eq 124 ] || [ $docker_exit -eq 124 ]; then
             log_warn "Execution timed out (60s) - agent is still processing in background"
-            echo "  (This is normal for longer tasks, results will appear when ready)"
+            echo "  (Results will appear when ready)"
+            echo ""
             
-        elif [ $exit_code -ne 0 ]; then
-            log_error "Agent execution failed with exit code $exit_code"
+        elif [ $exit_code -ne 0 ] || [ $docker_exit -ne 0 ]; then
+            log_error "Agent execution failed with exit code $exit_code / docker exit $docker_exit"
+            echo ""
             
-            # Check if output file has content
-            if [ ! -f "$output_file" ] || [ ! -s "$output_file" ]; then
+            # Show what happened
+            if [ -f "$output_file" ] && [ -s "$output_file" ]; then
+                echo "  Output captured:"
+                head -20 "$output_file"
+            else
+                echo "  No output captured"
                 echo ""
-                echo "  Showing container logs:"
-                docker compose logs --tail=30 openclaw-cli 2>/dev/null || true
+                echo "  Container logs:"
+                docker compose logs --tail=20 openclaw-cli 2>/dev/null || echo "  (Could not read logs)"
             fi
+            
             rm -f "$output_file"
             return 1
         fi
@@ -319,18 +364,17 @@ run_agent() {
     log_success "Agent execution complete"
     echo ""
     
-    log_info "Monitor ongoing work:"
+    log_info "Next steps:"
     echo ""
-    echo "  Option 1: Check result files (if task finished)"
-    echo "    $ ls ~/.openclaw/workspace/worker-*-result.md"
-    echo "    $ cat ~/.openclaw/workspace/worker-auth-result.md"
+    echo "  1. Check if agent ran:"
+    echo "     $ ls ~/.openclaw/workspace/worker-*-result.md"
+    echo "     $ cat ~/.openclaw/workspace/worker-auth-result.md"
     echo ""
-    echo "  Option 2: View browser in realtime (VNC)"
-    echo "    → Open: http://localhost:6080"
-    echo "    → Watch agent working"
+    echo "  2. View realtime browser activity:"
+    echo "     → http://localhost:6080 (VNC)"
     echo ""
-    echo "  Option 3: View logs (DEBUG)"
-    echo "    $ docker compose logs -f"
+    echo "  3. Debug with logs:"
+    echo "     $ docker compose logs -f"
     echo ""
 }
 
