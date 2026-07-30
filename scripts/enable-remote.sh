@@ -147,7 +147,11 @@ start_remote() {
     sleep 1
     
     # Create ngrok config for multiple tunnels
-    local ngrok_tunnels_config="$HOME/.ngrok2/openclaw-tunnels.yml"
+    # Use temp directory to avoid path issues
+    local ngrok_tunnels_config="/tmp/openclaw-tunnels.yml"
+    
+    # Create the config file with tunnels
+    mkdir -p "$(dirname "$ngrok_tunnels_config")"
     cat > "$ngrok_tunnels_config" << 'EOF'
 version: "2"
 tunnels:
@@ -162,11 +166,26 @@ tunnels:
     addr: 18789
 EOF
     
+    log_info "Tunnels config created at: $ngrok_tunnels_config"
+    
+    # Verify config file was created
+    if [ ! -f "$ngrok_tunnels_config" ]; then
+        log_error "Không thể tạo file config: $ngrok_tunnels_config"
+        return 1
+    fi
+    
     log_info "Starting ngrok tunnels..."
     
     # Start ngrok with all tunnels
-    # ngrok automatically loads config from ~/.ngrok2/ngrok.yml or ~/.config/ngrok/ngrok.yml
-    ngrok start --all --config "$ngrok_tunnels_config" > /dev/null 2>&1 &
+    # ngrok automatically loads auth config from ~/.ngrok2/ngrok.yml or ~/.config/ngrok/ngrok.yml
+    if ! ngrok start --all --config "$ngrok_tunnels_config" > /tmp/ngrok-start.log 2>&1 &
+    then
+        log_error "Không thể khởi động ngrok"
+        log_info "Debug log:"
+        tail -20 /tmp/ngrok-start.log
+        return 1
+    fi
+    
     NGROK_PID=$!
     
     # Wait for ngrok to start
