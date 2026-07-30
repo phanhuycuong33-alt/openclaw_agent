@@ -266,27 +266,56 @@ run_agent() {
     else
         # API failed or not available, use docker exec (preferred method)
         log_info "Using direct CLI execution (docker exec)..."
-        log_info "Streaming output realtime..."
         echo ""
         
         # Use docker exec - this is the actual working method
         cd "$DOCKER_DIR" || return 1
         
-        # Execute agent with realtime output streaming (no capture)
-        # Show output as it happens, with timeout as safety net
-        timeout 180 docker compose exec -T openclaw-cli node dist/index.js agent \
-            --message "$prompt" 2>&1 || {
-            local exit_code=$?
-            if [ $exit_code -eq 124 ]; then
+        # Execute agent with realtime output streaming
+        # Try without -T first (allows TTY/output), fallback if needed
+        echo "Running: docker compose exec openclaw-cli node dist/index.js agent --message \"...\""
+        echo ""
+        echo "─────────────────────────────────────────────────────────────────────"
+        
+        local agent_output=""
+        
+        # Run with timeout and capture both stdout + stderr
+        agent_output=$(timeout 180 docker compose exec -T openclaw-cli node dist/index.js agent \
+            --message "$prompt" 2>&1) 
+        local exit_code=$?
+        
+        if [ $exit_code -eq 124 ]; then
+            echo ""
+            log_warn "Execution timed out (180s) - agent is still processing in background"
+            echo "  (This is normal for longer tasks)"
+            echo ""
+            echo "  Agent output:"
+            echo "$agent_output" | head -100
+            
+        elif [ $exit_code -ne 0 ]; then
+            echo ""
+            log_error "Agent execution failed with exit code $exit_code"
+            echo ""
+            echo "  Error output:"
+            echo "$agent_output" | head -50
+            return 1
+            
+        else
+            # Success - show output
+            if [ -n "$agent_output" ]; then
+                echo "$agent_output"
+            else
+                # No stdout - show info and fallback to logs
+                log_warn "No output from agent (might be processing silently)"
                 echo ""
-                log_warn "Execution timed out (180s) - agent is still processing in background"
-                echo "  (This is normal for longer tasks)"
-            elif [ $exit_code -ne 0 ]; then
-                echo ""
-                log_error "Agent execution failed with exit code $exit_code"
-                return 1
+                echo "  Showing recent container logs:"
+                echo "─────────────────────────────────────────────────────────────────────"
+                docker compose logs --tail=50 openclaw-cli 2>/dev/null || true
             fi
-        }
+        fi
+        
+        echo ""
+        echo "─────────────────────────────────────────────────────────────────────"
     fi
     
     echo ""
