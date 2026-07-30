@@ -94,6 +94,21 @@ check_gateway() {
     wait_for_healthy || return 1
 }
 
+check_results() {
+    local workspace="$HOME/.openclaw/workspace"
+    
+    if [ ! -d "$workspace" ]; then
+        return 1
+    fi
+    
+    # Check for result files
+    if ls "$workspace"/worker-*-result.md >/dev/null 2>&1; then
+        return 0
+    fi
+    
+    return 1
+}
+
 # =============================================================================
 # TASK MAPPING
 # =============================================================================
@@ -239,35 +254,66 @@ run_agent() {
     echo "═══════════════════════════════════════════════════════════════════════"
     echo ""
     
-    # Send via HTTP API instead of interactive CLI (avoids Crestodian loop)
+    # Try HTTP API first (optional)
     local api_response=$(curl -s -X POST "http://localhost:18789/api/conversation" \
         -H "Content-Type: application/json" \
         -d "{\"message\": $(echo "$prompt" | jq -Rs .)}" 2>&1)
     
-    if [ -n "$api_response" ]; then
+    if [ -n "$api_response" ] && ! echo "$api_response" | grep -qi "not found\|404\|error"; then
+        # API worked
         log_success "API Response:"
         echo "$api_response" | jq -r '.response // .message // .' 2>/dev/null || echo "$api_response"
     else
-        log_warn "No API response, trying Docker exec fallback..."
+        # API failed or not available, use docker exec (preferred method)
+        log_info "Using direct CLI execution (docker exec)..."
+        echo ""
         
-        # Fallback: Use docker exec with timeout to prevent loop
-        # (timeout prevents infinite Crestodian prompt)
-        timeout 120 docker compose exec openclaw-cli node dist/index.js agent \
-            --message "$prompt" 2>&1 | head -100 || true
+        # Use docker exec - this is the actual working method
+        cd "$DOCKER_DIR" || return 1
+        
+        # Execute agent and capture result
+        local agent_output
+        agent_output=$(timeout 120 docker compose exec -T openclaw-cli node dist/index.js agent \
+            --message "$prompt" 2>&1) || {
+            local exit_code=$?
+            if [ $exit_code -eq 124 ]; then
+                log_warn "Execution timed out (120s) - agent is still processing in background"
+            elif [ $exit_code -ne 0 ]; then
+                log_error "Agent execution failed with exit code $exit_code"
+                echo "$agent_output" | tail -20
+                return 1
+            fi
+        }
+        
+        # Show last part of output
+        if [ -n "$agent_output" ]; then
+            echo "$agent_output" | tail -50
+        fi
     fi
     
     echo ""
     echo "═══════════════════════════════════════════════════════════════════════"
     echo ""
     
-    log_success "Agent execution sent"
+    log_success "Agent execution complete"
     echo ""
     
-    log_info "Next steps:"
-    echo "  1. Wait for worker to process (usually 10-30 seconds)"
-    echo "  2. Check results: cat ~/.openclaw/workspace/worker-*-result.md"
-    echo "  3. View logs: docker compose logs -f openclaw-gateway"
-    echo "  4. See browser: http://localhost:6080 (VNC)"
+    log_info "How to verify it worked:"
+    echo ""
+    echo "  Option 1: Check result files (BEST)"
+    echo "    $ ls -la ~/.openclaw/workspace/worker-*-result.md"
+    echo "    $ cat ~/.openclaw/workspace/worker-auth-result.md"
+    echo ""
+    echo "  Option 2: View browser activity (REALTIME)"
+    echo "    → Open: http://localhost:6080 (VNC)"
+    echo "    → Watch agent working in real-time"
+    echo ""
+    echo "  Option 3: Check logs (DEBUG)"
+    echo "    $ docker compose logs -f openclaw-gateway"
+    echo ""
+    
+    log_info "Status: Agent is running in background"
+    echo "  Wait 10-30 seconds for results..."
     echo ""
 }
 

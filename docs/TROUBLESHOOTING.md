@@ -159,17 +159,111 @@ docker compose exec openclaw-cli node dist/index.js agent --message "đọc spec
 
 ---
 
+## Is Agent Actually Working?
+
+### What You'll See
+```bash
+$ ./scripts/run-agent.sh auth
+
+[INFO] Waiting for containers to reach healthy state...
+[OK] Gateway is healthy: openclaw-gateway: Up 20s (healthy)
+[INFO] Sending to supervisor (HTTP API)...
+[OK] API response: Not found        ← This is NORMAL! Don't worry
+[INFO] Using direct CLI execution (docker exec)...
+
+[Agent output... might be long or empty]
+
+[OK] Agent execution complete
+
+How to verify it worked:
+  Option 1: Check result files (BEST)
+    $ ls -la ~/.openclaw/workspace/worker-*-result.md
+```
+
+**"API response: Not found" is NORMAL** - means HTTP API not available, script falls back to docker exec (which is better anyway).
+
+---
+
+## Verify Agent Actually Ran
+
+### Best Method: Check Result Files
+```bash
+# List results
+ls -la ~/.openclaw/workspace/worker-*-result.md
+
+# View result
+cat ~/.openclaw/workspace/worker-auth-result.md
+
+# Expected output (example):
+# Status: PASS
+# Task: Check if GitHub is authenticated
+# Result: Successfully authenticated as username
+```
+
+### Real-time Monitoring: VNC Browser
+```bash
+# Open in browser
+http://localhost:6080
+
+# You'll see:
+# - Agent opening Firefox/Chrome
+# - Navigating to GitHub
+# - Logging in
+# - Writing results
+```
+
+### Debug: Check Logs
+```bash
+# View gateway logs (before running agent)
+docker logs -f openclaw-gateway
+
+# Run agent (in another terminal)
+./scripts/run-agent.sh auth
+
+# Watch logs update with agent activity
+```
+
+---
+
+## Common Output
+
+### ✅ SUCCESS
+```
+[INFO] Using direct CLI execution (docker exec)...
+[Output from agent...]
+[OK] Agent execution complete
+
+$ cat ~/.openclaw/workspace/worker-auth-result.md
+Status: PASS
+```
+
+### ⚠️ TIMEOUT (But Still Working!)
+```
+[WARN] Execution timed out (120s) - agent is still processing in background
+
+→ Agent is still running, check results in 30 seconds
+→ Don't restart - let it finish
+```
+
+### ❌ ERROR
+```
+[ERROR] Agent execution failed with exit code 1
+[Error output...]
+
+→ Check logs: docker compose logs
+→ Restart: docker compose restart
+```
+
+---
+
 ## Debug Commands
 
 ### Check Gateway status
 ```bash
-# HTTP
+# Test if gateway responds
 curl http://localhost:18789/api/status
 
-# WebSocket (using websocat)
-websocat ws://localhost:18789/ws
-
-# Docker logs
+# Docker logs (realtime)
 docker logs -f openclaw-gateway
 docker logs -f openclaw-cli
 ```

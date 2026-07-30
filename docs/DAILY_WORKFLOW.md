@@ -100,6 +100,18 @@ docker ps --format "table {{.Names}}\t{{.Status}}"
 # ./scripts/test-agents.sh auth
 ```
 
+### Bước 6: Verify it worked
+```bash
+# BEST: Check result files (wait 10-30 seconds after running agent)
+cat ~/.openclaw/workspace/worker-auth-result.md
+
+# REALTIME: Open VNC to watch browser
+http://localhost:6080
+
+# DEBUG: View logs
+docker compose logs -f
+```
+
 ---
 
 ## 🔧 Troubleshoot Daily Startup
