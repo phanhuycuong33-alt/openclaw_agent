@@ -283,7 +283,7 @@ run_agent() {
         local exit_code=0
         
         # Use tee to stream output AND save to file, with timeout
-        timeout 180 docker compose exec -T openclaw-cli node dist/index.js agent \
+        timeout 60 docker compose exec -T openclaw-cli node dist/index.js agent \
             --message "$prompt" 2>&1 | tee "$output_file" || exit_code=$?
         
         echo ""
@@ -292,7 +292,7 @@ run_agent() {
         
         # Handle exit codes
         if [ $exit_code -eq 124 ]; then
-            log_warn "Execution timed out (180s) - agent is still processing in background"
+            log_warn "Execution timed out (60s) - agent is still processing in background"
             echo "  (This is normal for longer tasks, results will appear when ready)"
             
         elif [ $exit_code -ne 0 ]; then
