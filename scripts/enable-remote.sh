@@ -138,6 +138,27 @@ start_remote() {
         return 1
     fi
     
+    # Detect ngrok version
+    local ngrok_version=$(ngrok version 2>/dev/null | grep -oP '\d+' | head -1)
+    log_info "Detected ngrok version: v${ngrok_version}.x"
+    
+    # Check free tier limitation
+    echo ""
+    echo "⚠️  Important: Ngrok Free Tier Limitation"
+    echo "─────────────────────────────────────────"
+    echo "Free tier only allows 1 tunnel at a time."
+    echo "Choose which service to expose:"
+    echo ""
+    echo "  1. SSH only (port 22)         - for terminal access"
+    echo "  2. VNC only (port 6080)       - for browser GUI"
+    echo "  3. Gateway only (port 18789)  - for OpenClaw API"
+    echo "  4. Run VNC + Gateway (serial) - slower but works on free"
+    echo ""
+    read -p "Choose (1-4, default=2): " tunnel_choice
+    tunnel_choice=${tunnel_choice:-2}
+    
+    echo ""
+    
     # Start SSH service
     log_info "Starting SSH service..."
     sudo service ssh start 2>/dev/null || sudo systemctl start sshd 2>/dev/null || true
@@ -147,55 +168,51 @@ start_remote() {
     sleep 1
     
     log_info "Starting ngrok tunnels..."
-    log_info "  - SSH (TCP port 22)"
-    log_info "  - VNC (HTTP port 6080)"
-    log_info "  - Gateway (HTTP port 18789)"
     echo ""
     
-    # Start ngrok tunnels in background
-    # Note: Each tunnel needs its own ngrok process OR use ngrok agent with config
-    # We'll start them with config file but with verbose output
-    
-    # Create ngrok config for multiple tunnels
-    local ngrok_config_dir="$HOME/.ngrok2"
-    mkdir -p "$ngrok_config_dir"
-    
-    local ngrok_tunnels_config="$ngrok_config_dir/openclaw-tunnels.yml"
-    cat > "$ngrok_tunnels_config" << 'EOF'
-version: "2"
-tunnels:
-  ssh:
-    proto: tcp
-    addr: 22
-  vnc:
-    proto: http
-    addr: 6080
-  gateway:
-    proto: http
-    addr: 18789
-EOF
-    
-    log_info "Tunnels config: $ngrok_tunnels_config"
-    
-    # Start ngrok - show output to help debug
-    log_info "Running: ngrok start --all --config $ngrok_tunnels_config"
-    echo ""
-    
-    ngrok start --all --config "$ngrok_tunnels_config" &
-    NGROK_PID=$!
+    # Start tunnels based on choice
+    case "$tunnel_choice" in
+        1)
+            log_info "Starting SSH tunnel (port 22)..."
+            ngrok tcp 22 &
+            NGROK_PID=$!
+            ;;
+        2)
+            log_info "Starting VNC tunnel (port 6080)..."
+            ngrok http 6080 &
+            NGROK_PID=$!
+            ;;
+        3)
+            log_info "Starting Gateway tunnel (port 18789)..."
+            ngrok http 18789 &
+            NGROK_PID=$!
+            ;;
+        4)
+            log_info "Starting VNC tunnel (port 6080)..."
+            ngrok http 6080 &
+            VNC_PID=$!
+            sleep 10
+            
+            log_info "Stopping VNC tunnel..."
+            kill $VNC_PID 2>/dev/null || true
+            sleep 2
+            
+            log_info "Starting Gateway tunnel (port 18789)..."
+            ngrok http 18789 &
+            NGROK_PID=$!
+            ;;
+        *)
+            log_error "Invalid choice"
+            return 1
+            ;;
+    esac
     
     # Wait for ngrok to start
     sleep 5
     
     # Check if ngrok started successfully
     if ! kill -0 $NGROK_PID 2>/dev/null; then
-        log_error "Ngrok process died. Checking credentials..."
-        sleep 2
-        
-        # Show ngrok config status
-        log_info "Running: ngrok config check"
-        ngrok config check || true
-        
+        log_error "Ngrok process died."
         return 1
     fi
     
@@ -228,29 +245,23 @@ EOF
         return 1
     fi
     
-    # Parse tunnel URLs (with fallback if jq not available)
+    # Parse tunnel URLs (ngrok started from CLI will have name "command_line")
     local ssh_url=""
     local vnc_url=""
     local gateway_url=""
+    local public_url=""
     
+    # Get the public URL from the tunnel
     if command -v jq &> /dev/null; then
-        ssh_url=$(echo "$tunnels_json" | jq -r '.tunnels[] | select(.name=="ssh") | .public_url' 2>/dev/null | sed 's|tcp://||' | head -1)
-        vnc_url=$(echo "$tunnels_json" | jq -r '.tunnels[] | select(.name=="vnc") | .public_url' 2>/dev/null | head -1)
-        gateway_url=$(echo "$tunnels_json" | jq -r '.tunnels[] | select(.name=="gateway") | .public_url' 2>/dev/null | head -1)
+        public_url=$(echo "$tunnels_json" | jq -r '.tunnels[0].public_url' 2>/dev/null)
     else
-        log_warn "jq không được cài, dùng grep thay thế..."
-        # Fallback: try to extract URLs with grep
-        ssh_url=$(echo "$tunnels_json" | grep -o '"public_url":"[^"]*tcp[^"]*"' | head -1 | cut -d'"' -f4 | sed 's|tcp://||')
-        vnc_url=$(echo "$tunnels_json" | grep -o '"public_url":"https[^"]*"' | head -1 | cut -d'"' -f4)
-        gateway_url=$(echo "$tunnels_json" | grep -o '"public_url":"https[^"]*"' | tail -1 | cut -d'"' -f4)
+        public_url=$(echo "$tunnels_json" | grep -o '"public_url":"[^"]*"' | head -1 | cut -d'"' -f4)
     fi
     
-    # Fallback: if no named tunnels, use first available
-    if [ -z "$ssh_url" ] || [ -z "$vnc_url" ] || [ -z "$gateway_url" ]; then
-        log_warn "Không tìm thấy tất cả tunnel. Raw response:"
-        echo "$tunnels_json" | head -50
-        echo ""
-        log_warn "Có thể cấu hình tunnel config không khớp"
+    if [ -n "$public_url" ] && [ "$public_url" != "null" ]; then
+        log_success "Tunnel URL: $public_url"
+    else
+        log_warn "Không tìm thấy public URL"
     fi
     
     # Get current user
@@ -275,47 +286,23 @@ EOF
     log_success "Remote Access đã được bật!"
     echo ""
     echo "┌─────────────────────────────────────────────────────────────────────┐"
-    echo "│  SSH Access (từ laptop khác hoặc điện thoại)                       │"
+    echo "│  Ngrok Tunnel (Access from anywhere with internet)                 │"
     echo "├─────────────────────────────────────────────────────────────────────┤"
     
-    if [ -n "$ssh_url" ] && [ "$ssh_url" != "null" ]; then
-        local ssh_host=$(echo "$ssh_url" | cut -d: -f1)
-        local ssh_port=$(echo "$ssh_url" | cut -d: -f2)
-        echo "│  ssh $current_user@$ssh_host -p $ssh_port"
-        echo "│"
+    if [ -n "$public_url" ] && [ "$public_url" != "null" ]; then
+        echo "│  URL: $public_url"
     else
-        echo "│  (SSH tunnel không khả dụng)"
-    fi
-    
-    echo "├─────────────────────────────────────────────────────────────────────┤"
-    echo "│  VNC (Xem browser từ xa)                                           │"
-    echo "├─────────────────────────────────────────────────────────────────────┤"
-    
-    if [ -n "$vnc_url" ] && [ "$vnc_url" != "null" ]; then
-        echo "│  $vnc_url"
-    else
-        echo "│  (VNC tunnel không khả dụng)"
-    fi
-    
-    echo "│"
-    echo "├─────────────────────────────────────────────────────────────────────┤"
-    echo "│  Gateway API (OpenClaw Web Interface)                              │"
-    echo "├─────────────────────────────────────────────────────────────────────┤"
-    
-    if [ -n "$gateway_url" ] && [ "$gateway_url" != "null" ]; then
-        echo "│  $gateway_url"
-    else
-        echo "│  (Gateway tunnel không khả dụng)"
+        echo "│  (Tunnel URL không khả dụng)"
     fi
     
     echo "│"
     echo "└─────────────────────────────────────────────────────────────────────┘"
     echo ""
-    echo "ngrok Dashboard: http://localhost:4040"
+    echo "ngrok Dashboard (local): http://localhost:4040"
     echo ""
     echo "═══════════════════════════════════════════════════════════════════════"
     echo ""
-    log_info "Lưu ý: Các URL này sẽ thay đổi mỗi lần restart"
+    log_info "Lưu ý: URL này sẽ thay đổi mỗi lần restart"
     log_info "Để dừng: ./scripts/enable-remote.sh stop"
     echo ""
     
