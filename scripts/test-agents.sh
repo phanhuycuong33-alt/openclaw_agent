@@ -182,14 +182,23 @@ PROMPT_EOF
 
     log_info "Sending task to OpenClaw API..."
     echo ""
+    echo "Task: $task"
+    echo ""
     
     # Send via OpenClaw API (conversation endpoint)
     local response
+    log_info "POST http://localhost:18789/api/conversation"
     response=$(curl -s -X POST "http://localhost:18789/api/conversation" \
         -H "Content-Type: application/json" \
         -d "{\"message\": $(cat "$prompt_file" | jq -Rs .)}" 2>&1)
     
-    if [ $? -ne 0 ]; then
+    if [ $? -eq 0 ]; then
+        log_success "API Response:"
+        echo "$response" | jq -r '.response // .message // .error // .' 2>/dev/null || echo "$response"
+        echo ""
+        # API returned, now poll for worker results
+        poll_for_results "$task_id"
+    else
         log_warn "API call failed, falling back to CLI..."
         # Copy prompt to container and use CLI
         docker cp "$prompt_file" "$CONTAINER:/tmp/task-prompt.txt"
@@ -205,11 +214,6 @@ PROMPT_EOF
         
         # Wait and poll for results
         poll_for_results "$task_id"
-    else
-        echo "$response" | jq -r '.response // .message // .error // .' 2>/dev/null || echo "$response"
-        echo ""
-        # API returned, now poll for worker results
-        poll_for_results "$task_id"
     fi
     
     # Cleanup
@@ -221,6 +225,7 @@ poll_for_results() {
     local max_wait=300  # 5 minutes
     local elapsed=0
     local check_interval=5
+    local last_log_line=0
     
     # Ensure container is set
     if [ -z "$CONTAINER" ]; then
@@ -232,14 +237,29 @@ poll_for_results() {
         return 1
     fi
     
-    log_info "Polling for worker results in container: $CONTAINER"
+    echo ""
+    echo "═══════════════════════════════════════════════════════════════════════"
+    log_info "⏳ Polling for results (timeout: ${max_wait}s)"
+    echo "═══════════════════════════════════════════════════════════════════════"
+    echo ""
+    echo "Container logs:"
+    echo "───────────────────────────────────────────────────────────────────────"
+    echo ""
     
     while [ $elapsed -lt $max_wait ]; do
+        # Show docker logs (new lines only)
+        docker logs --tail=20 "$CONTAINER" 2>/dev/null | tail -n +$((last_log_line + 1)) 2>/dev/null | while IFS= read -r line; do
+            echo "  $line"
+            last_log_line=$((last_log_line + 1))
+        done
+        
         # Check if any result file exists
         for result_file in "worker-auth-result.md" "worker-generate-code-result.md" "worker-publish-mcp-result.md"; do
             if docker exec "$CONTAINER" test -f "/home/node/.openclaw/workspace/$result_file" 2>/dev/null; then
                 echo ""
-                log_success "Found result: $result_file"
+                echo "───────────────────────────────────────────────────────────────────────"
+                log_success "✓ Found result: $result_file"
+                echo "───────────────────────────────────────────────────────────────────────"
                 echo ""
                 
                 # Read and parse result
@@ -254,11 +274,12 @@ poll_for_results() {
                 
                 case "$status" in
                     PASS)
-                        log_success "Task completed successfully!"
+                        log_success "✓ Task completed successfully!"
+                        echo ""
                         return 0
                         ;;
                     REQUIRES_USER_ACTION)
-                        log_warn "User action required!"
+                        log_warn "⚠ User action required!"
                         echo ""
                         echo "The agent needs you to do something."
                         echo "Check VNC at http://localhost:6080"
@@ -270,7 +291,7 @@ poll_for_results() {
                     BLOCKED)
                         local blocker
                         blocker=$(echo "$result" | grep -i "^blocker:" | cut -d: -f2-)
-                        log_warn "Task blocked: $blocker"
+                        log_warn "⚠ Task blocked: $blocker"
                         local next_action
                         next_action=$(echo "$result" | grep -i "^next_action:" | cut -d: -f2 | tr -d ' ')
                         if [ "$next_action" = "CALL_AUTH" ]; then
@@ -279,16 +300,19 @@ poll_for_results() {
                         fi
                         ;;
                     FAILED)
-                        log_error "Task failed!"
+                        log_error "✗ Task failed!"
                         return 1
                         ;;
                 esac
             fi
         done
         
+        # Show progress
         sleep $check_interval
         elapsed=$((elapsed + check_interval))
-        printf "."
+        
+        local remaining=$((max_wait - elapsed))
+        printf "  ⏳ Waiting... (${elapsed}s / ${max_wait}s, ${remaining}s remaining)  \r"
     done
     
     echo ""
