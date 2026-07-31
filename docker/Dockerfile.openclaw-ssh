@@ -15,6 +15,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Create sshd runtime directory
 RUN mkdir -p /run/sshd
 
+# Generate SSH host keys (required by sshd)
+RUN ssh-keygen -A
+
 COPY scripts/start-vnc.sh /usr/local/bin/start-vnc.sh
 COPY scripts/start-openclaw-with-vnc.sh /usr/local/bin/start-openclaw-with-vnc.sh
 
