@@ -99,31 +99,28 @@ fi
 check_and_cleanup_ports() {
     log_info "Checking for port conflicts..."
     
-    # Check if port 22 is already in use
-    if lsof -i :22 >/dev/null 2>&1 || netstat -tuln 2>/dev/null | grep -q ":22 "; then
-        log_warn "Port 22 is already in use!"
-        
-        # Try to find and stop the openclaw-ssh container
-        if docker ps -a --format "{{.Names}}" | grep -q "openclaw-ssh"; then
-            log_info "Stopping existing openclaw-ssh container..."
-            docker stop openclaw_agent-openclaw-ssh-1 2>/dev/null || true
-            sleep 1
-        fi
-        
-        # Check if port 22 is still in use (might be another service)
-        if lsof -i :22 >/dev/null 2>&1 || netstat -tuln 2>/dev/null | grep -q ":22 "; then
-            log_error "Port 22 still in use by another process!"
-            echo "  Fix: Check what's using port 22:"
-            echo "    lsof -i :22     (Linux/Mac)"
-            echo "    netstat -ano | findstr :22  (Windows)"
-            return 1
-        fi
-    fi
+    # Aggressively cleanup first (better than selective stop)
+    log_info "Cleaning up previous containers..."
+    docker compose -f "$COMPOSE_FILE" down -v --remove-orphans 2>/dev/null || true
+    sleep 3  # Give OS time to release port
     
-    # Remove orphan containers
-    if docker compose -f "$COMPOSE_FILE" ps --all 2>/dev/null | grep -q "orphan"; then
-        log_info "Removing orphan containers..."
-        docker compose -f "$COMPOSE_FILE" down --remove-orphans 2>/dev/null || true
+    # Check if port 22 is still in use by something else
+    if lsof -i :22 >/dev/null 2>&1 || netstat -tuln 2>/dev/null | grep -q ":22 "; then
+        log_warn "Port 22 is still in use by another process!"
+        
+        # Try to identify what's using it
+        local pid=$(lsof -t -i :22 2>/dev/null || true)
+        if [ -n "$pid" ]; then
+            log_warn "Process using port 22: PID=$pid"
+            local proc=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
+            log_warn "Process name: $proc"
+        fi
+        
+        echo "  Options:"
+        echo "    1. Stop the process: sudo kill -9 $pid"
+        echo "    2. Use different port: Edit docker-compose.yml, change '22:22' to '2222:22'"
+        echo "    3. Restart WSL: wsl --shutdown"
+        return 1
     fi
     
     return 0
@@ -132,9 +129,8 @@ check_and_cleanup_ports() {
 # Run cleanup checks
 if ! check_and_cleanup_ports; then
     echo ""
-    log_error "Unable to resolve port conflicts. Trying full cleanup..."
-    docker compose -f "$COMPOSE_FILE" down -v
-    sleep 2
+    log_error "Port 22 still in use. Cannot start OpenClaw."
+    exit 1
 fi
 
 # First time: run onboard to create config (only for gateway mode)
@@ -147,6 +143,7 @@ if [ "$GATEWAY_MODE" = true ]; then
 fi
 
 # Start containers
+log_info "Starting containers (port 22 should now be available)..."
 docker compose -f "$COMPOSE_FILE" up -d
 
 # Wait for containers to be ready
