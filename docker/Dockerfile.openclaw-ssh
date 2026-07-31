@@ -15,8 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Create sshd runtime directory
 RUN mkdir -p /run/sshd
 
-COPY start-vnc.sh /usr/local/bin/start-vnc.sh
-COPY start-openclaw-with-vnc.sh /usr/local/bin/start-openclaw-with-vnc.sh
+COPY scripts/start-vnc.sh /usr/local/bin/start-vnc.sh
+COPY scripts/start-openclaw-with-vnc.sh /usr/local/bin/start-openclaw-with-vnc.sh
 
 RUN chmod +x \
     /usr/local/bin/start-vnc.sh \
