@@ -4,6 +4,9 @@
 
 services:
   openclaw-cli:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.openclaw-ssh
     image: openclaw-ssh:latest
     env_file:
       - path: docker/.env
@@ -45,6 +48,9 @@ services:
       start_period: 5s
 
   openclaw-ssh:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.openclaw-ssh
     image: openclaw-ssh:latest
     env_file:
       - path: docker/.env

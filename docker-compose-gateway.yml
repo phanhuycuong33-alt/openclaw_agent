@@ -89,6 +89,9 @@ services:
       start_period: 10s
 
   openclaw-cli:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.openclaw-ssh
     image: openclaw-ssh:latest
     network_mode: "service:openclaw-gateway"
     env_file:
@@ -125,6 +128,9 @@ services:
       start_period: 5s
 
   openclaw-ssh:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.openclaw-ssh
     image: openclaw-ssh:latest
     network_mode: "service:openclaw-gateway"
     env_file:
