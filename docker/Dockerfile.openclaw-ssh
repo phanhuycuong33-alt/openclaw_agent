@@ -4,12 +4,16 @@ USER root
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-client \
+    openssh-server \
     chromium \
     xvfb \
     x11vnc \
     novnc \
     websockify \
     && rm -rf /var/lib/apt/lists/*
+
+# Create sshd runtime directory
+RUN mkdir -p /run/sshd
 
 COPY start-vnc.sh /usr/local/bin/start-vnc.sh
 COPY start-openclaw-with-vnc.sh /usr/local/bin/start-openclaw-with-vnc.sh
