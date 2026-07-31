@@ -64,6 +64,7 @@ services:
       - "2222:22"
     init: true
     restart: "no"
+    command: ["/usr/sbin/sshd", "-D"]
     healthcheck:
       test: ["CMD", "sh", "-c", "ps aux | grep '[s]shd' || exit 1"]
       interval: 2s

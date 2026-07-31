@@ -143,6 +143,7 @@ services:
     init: true
     depends_on:
       - openclaw-gateway
+    command: ["/usr/sbin/sshd", "-D"]
     healthcheck:
       test: ["CMD", "sh", "-c", "ps aux | grep '[s]shd' || exit 1"]
       interval: 2s
