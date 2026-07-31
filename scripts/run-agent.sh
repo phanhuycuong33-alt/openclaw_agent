@@ -52,20 +52,22 @@ wait_for_healthy() {
     log_info "Waiting for containers to reach healthy state..."
     
     while [ $attempt -lt $max_attempts ]; do
-        # Check if at least gateway is healthy or running
-        local status=$(docker ps --format "{{.Names}}: {{.Status}}" | grep openclaw-gateway | head -1 || true)
+        # Check for ANY openclaw container that's healthy
+        # Support both LOCAL mode (cli + ssh) and GATEWAY mode (gateway + cli + ssh)
+        local healthy_count=$(docker ps --format "{{.Names}}: {{.Status}}" | grep openclaw | grep -c "(healthy)" || true)
+        local running_count=$(docker ps --format "{{.Names}}: {{.Status}}" | grep openclaw | grep -c "Up" || true)
         
-        if echo "$status" | grep -q "(healthy)"; then
-            log_success "Gateway is healthy: $status"
+        if [ "$healthy_count" -ge 1 ]; then
+            log_success "Containers are healthy ($healthy_count healthy)"
             return 0
         fi
         
-        if echo "$status" | grep -q "Up"; then
-            # Container is up but might still be starting
+        if [ "$running_count" -ge 1 ]; then
+            # At least one container running
             local elapsed=$((attempt * 2))
             if [ $elapsed -gt 10 ]; then
-                # If up for more than 10 seconds, consider it ready enough
-                log_success "Gateway is running: $status"
+                # If running for more than 10 seconds, consider it ready
+                log_success "Containers are running ($running_count containers)"
                 return 0
             fi
         fi
@@ -80,10 +82,10 @@ wait_for_healthy() {
         ((attempt++))
     done
     
-    # Even if not healthy, if containers are running, proceed
-    local status=$(docker ps --format "{{.Names}}: {{.Status}}" | grep openclaw-gateway || true)
-    if [ -n "$status" ]; then
-        log_warn "Containers running but health status unknown. Proceeding anyway..."
+    # Even if not fully healthy, if any container is running, proceed
+    local running=$(docker ps --format "{{.Names}}" | grep openclaw || true)
+    if [ -n "$running" ]; then
+        log_warn "Containers running but may not be fully healthy. Proceeding anyway..."
         return 0
     fi
     
