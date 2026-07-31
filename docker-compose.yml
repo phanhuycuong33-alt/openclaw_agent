@@ -37,6 +37,12 @@ services:
     init: true
     entrypoint: ["node", "dist/index.js"]
     restart: "no"
+    healthcheck:
+      test: ["CMD", "node", "-e", "console.log('ok')"]
+      interval: 2s
+      timeout: 1s
+      retries: 3
+      start_period: 5s
 
   openclaw-ssh:
     image: openclaw-ssh:latest
@@ -58,3 +64,9 @@ services:
       - "22:22"
     init: true
     restart: "no"
+    healthcheck:
+      test: ["CMD", "test", "-f", "/etc/ssh/sshd_config"]
+      interval: 2s
+      timeout: 1s
+      retries: 3
+      start_period: 5s
