@@ -70,6 +70,7 @@ services:
       - "2222:22"
     init: true
     restart: "no"
+    user: root
     command: ["/usr/sbin/sshd", "-D"]
     healthcheck:
       test: ["CMD", "sh", "-c", "ps aux | grep '[s]shd' || exit 1"]
