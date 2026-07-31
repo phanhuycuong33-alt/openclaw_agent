@@ -61,7 +61,7 @@ services:
     volumes:
       - "${HOME}/.openclaw:/home/node/.openclaw"
     ports:
-      - "22:22"
+      - "2222:22"
     init: true
     restart: "no"
     healthcheck:

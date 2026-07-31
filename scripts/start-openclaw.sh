@@ -218,7 +218,7 @@ if [ "$GATEWAY_MODE" = true ]; then
 else
     echo "📍 Local Mode (CLI only - no web interface)"
     echo "─────────────────────────────────────────────"
-    echo "  SSH Access:     localhost:22"
+    echo "  SSH Access:     localhost:2222"
     echo "  Command line:   ./scripts/run-agent.sh"
     echo ""
 fi

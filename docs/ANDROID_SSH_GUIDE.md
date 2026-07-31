@@ -86,7 +86,7 @@ cat ~/.ssh/id_rsa.pub
 
 **Setup:**
 1. "Menu" → "Open" hoặc click "+"
-2. Paste: `user@100.64.x.x:22`
+2. Paste: `user@100.64.x.x:2222`
 3. Tap → **Connect**
 4. Accept fingerprint
 5. Login
