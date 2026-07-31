@@ -93,16 +93,12 @@ wait_for_healthy() {
 }
 
 check_gateway() {
-    if ! docker ps | grep -q "openclaw"; then
+    if ! docker ps | grep -q "openclaw-cli"; then
         log_error "OpenClaw containers not running"
         log_info "Start with: ./scripts/start-openclaw.sh"
-        log_info "  For local mode (CLI only): ./scripts/start-openclaw.sh"
-        log_info "  For gateway mode (web UI): ./scripts/start-openclaw.sh --gateway"
         return 1
     fi
-    
-    # Wait for healthy state
-    wait_for_healthy || return 1
+    return 0
 }
 
 check_results() {
@@ -281,86 +277,63 @@ run_agent() {
     echo "Task: $task_input"
     echo ""
     
-    log_info "Sending to supervisor (HTTP API)..."
+    log_info "Sending to supervisor (direct execution)..."
     echo ""
     
     echo "═══════════════════════════════════════════════════════════════════════"
     echo ""
     
-    # Send via HTTP API first (optional, might not work in local mode)
-    # Local mode doesn't have gateway, so this will fail gracefully
-    local api_response=$(curl -s -X POST "http://localhost:18789/api/conversation" \
-        -H "Content-Type: application/json" \
-        -d "{\"message\": $(echo "$prompt" | jq -Rs .)}" 2>&1)
+    # Execute agent with realtime output streaming via docker exec
+    cd "$REPO_ROOT" || return 1
     
-    if [ -n "$api_response" ] && ! echo "$api_response" | grep -qi "not found\|404\|error\|connection refused"; then
-        # API worked (gateway mode only)
-        log_success "API Response:"
-        echo "$api_response" | jq -r '.response // .message // .' 2>/dev/null || echo "$api_response"
-    else
-        # API not available (expected in local mode) - use docker exec directly
-        log_info "Using direct CLI execution (docker exec)..."
+    echo "Step 1: Preparing prompt..."
+    local prompt_len=${#prompt}
+    echo "  Prompt size: $prompt_len bytes"
+    echo ""
+    
+    echo "Step 2: Executing agent..."
+    echo "  Command: docker compose exec -T openclaw-cli node dist/index.js agent --message \"...\""
+    echo ""
+    echo "─────────────────────────────────────────────────────────────────────"
+    echo ""
+    
+    log_info "⏳ Agent running... (timeout 60s)"
+    echo ""
+    
+    # Direct execution without API fallback
+    local output_file="/tmp/openclaw-output-$$.txt"
+    local exit_code=0
+    
+    timeout 60 docker compose exec -T openclaw-cli node dist/index.js agent \
+        --message "$prompt" 2>&1 | tee "$output_file" || exit_code=$?
+    
+    echo ""
+    echo "─────────────────────────────────────────────────────────────────────"
+    echo ""
+    
+    # Handle exit codes
+    if [ $exit_code -eq 124 ]; then
+        log_warn "Execution timed out (60s) - agent is still processing"
+        echo "  Check logs: docker compose logs openclaw-cli"
         echo ""
         
-        # Use docker exec - this is the actual working method
-        cd "$REPO_ROOT" || return 1
-        
-        # Execute agent with realtime output streaming
-        echo "Step 1: Preparing prompt..."
-        local prompt_len=${#prompt}
-        echo "  Prompt size: $prompt_len bytes"
+    elif [ $exit_code -ne 0 ]; then
+        log_error "Agent execution failed with exit code $exit_code"
         echo ""
         
-        echo "Step 2: Executing docker compose exec..."
-        echo "  Command: docker compose exec -T openclaw-cli node dist/index.js agent --message \"...\""
-        echo ""
-        echo "─────────────────────────────────────────────────────────────────────"
-        echo ""
-        
-        # Stream output realtime while also capturing for error detection
-        local output_file="/tmp/openclaw-output-$$.txt"
-        local exit_code=0
-        
-        log_info "⏳ Agent running... (timeout 60s)"
-        echo ""
-        
-        # Use tee to stream output AND save to file, with timeout
-        timeout 60 docker compose exec -T openclaw-cli node dist/index.js agent \
-            --message "$prompt" 2>&1 | tee "$output_file" || exit_code=$?
-        
-        local docker_exit=$?
-        echo ""
-        echo "─────────────────────────────────────────────────────────────────────"
-        echo ""
-        
-        # Handle exit codes
-        if [ $exit_code -eq 124 ] || [ $docker_exit -eq 124 ]; then
-            log_warn "Execution timed out (60s) - agent is still processing in background"
-            echo "  (Results will appear when ready)"
-            echo ""
-            
-        elif [ $exit_code -ne 0 ] || [ $docker_exit -ne 0 ]; then
-            log_error "Agent execution failed with exit code $exit_code / docker exit $docker_exit"
-            echo ""
-            
-            # Show what happened
-            if [ -f "$output_file" ] && [ -s "$output_file" ]; then
-                echo "  Output captured:"
-                head -20 "$output_file"
-            else
-                echo "  No output captured"
-                echo ""
-                echo "  Container logs:"
-                docker compose logs --tail=20 openclaw-cli 2>/dev/null || echo "  (Could not read logs)"
-            fi
-            
-            rm -f "$output_file"
-            return 1
+        if [ -f "$output_file" ] && [ -s "$output_file" ]; then
+            echo "  Last output:"
+            tail -20 "$output_file"
         fi
+        echo ""
+        echo "  Container logs:"
+        docker compose logs --tail=20 openclaw-cli 2>/dev/null || echo "  (Could not read logs)"
         
-        # Clean up
         rm -f "$output_file"
+        return 1
     fi
+    
+    rm -f "$output_file"
     
     echo ""
     echo "═══════════════════════════════════════════════════════════════════════"
