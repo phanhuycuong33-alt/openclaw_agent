@@ -144,7 +144,7 @@ services:
     depends_on:
       - openclaw-gateway
     healthcheck:
-      test: ["CMD", "pgrep", "-f", "sshd"]
+      test: ["CMD", "sh", "-c", "ps aux | grep '[s]shd' || exit 1"]
       interval: 2s
       timeout: 1s
       retries: 3
