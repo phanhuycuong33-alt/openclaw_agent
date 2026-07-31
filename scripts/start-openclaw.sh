@@ -29,6 +29,17 @@ echo "║              OpenClaw Agent - Starting Containers                     
 echo "╚═══════════════════════════════════════════════════════════════════════╝"
 echo ""
 
+# Parse arguments
+GATEWAY_MODE=false
+if [ "$1" = "--gateway" ]; then
+    GATEWAY_MODE=true
+    echo "[INFO] Using GATEWAY mode (with web interface)"
+else
+    echo "[INFO] Using LOCAL mode (CLI only, no web gateway)"
+    echo "       Tip: Use './scripts/start-openclaw.sh --gateway' for web mode"
+fi
+echo ""
+
 log_info "Preparing directories..."
 mkdir -p "$OPENCLAW_DIR"
 mkdir -p "$WORKSPACE_DIR"
@@ -78,15 +89,23 @@ log_info "Starting OpenClaw containers..."
 
 cd "$REPO_ROOT"
 
-# First time: run onboard to create config
-if [ ! -f "$OPENCLAW_DIR/openclaw.mjs" ] || ! grep -q "gateway" "$OPENCLAW_DIR/openclaw.mjs" 2>/dev/null; then
-    log_info "First-time setup: running OpenClaw onboard..."
-    docker compose run --rm openclaw-gateway openclaw onboard --non-interactive --mode local || true
-    sleep 2
+# Select compose file based on mode
+COMPOSE_FILE="docker-compose.yml"  # Local mode (default)
+if [ "$GATEWAY_MODE" = true ]; then
+    COMPOSE_FILE="docker-compose-gateway.yml"
+fi
+
+# First time: run onboard to create config (only for gateway mode)
+if [ "$GATEWAY_MODE" = true ]; then
+    if [ ! -f "$OPENCLAW_DIR/openclaw.mjs" ] || ! grep -q "gateway" "$OPENCLAW_DIR/openclaw.mjs" 2>/dev/null; then
+        log_info "First-time setup: running OpenClaw onboard..."
+        docker compose -f "$COMPOSE_FILE" run --rm openclaw-gateway openclaw onboard --non-interactive --mode local || true
+        sleep 2
+    fi
 fi
 
 # Start containers
-docker compose up -d
+docker compose -f "$COMPOSE_FILE" up -d
 
 # Wait for containers to be ready
 log_info "Waiting for containers to reach healthy state..."
@@ -95,16 +114,22 @@ wait_for_health() {
     local max_attempts=60  # 60 * 2 = 120 seconds max wait
     local attempt=0
     local healthy_count=0
-    local target_count=3   # gateway, cli, ssh
+    local target_count=2   # cli + ssh (or gateway + cli + ssh in gateway mode)
     
     while [ $attempt -lt $max_attempts ]; do
         # Check health status
-        local status=$(docker ps --format "{{.Names}}: {{.Status}}" | grep openclaw || true)
-        healthy_count=$(echo "$status" | grep -c "(healthy)" || true)
+        if [ "$GATEWAY_MODE" = true ]; then
+            local status=$(docker compose -f "$COMPOSE_FILE" ps --format "{{.Names}}: {{.Status}}" | grep openclaw || true)
+            healthy_count=$(echo "$status" | grep -c "(healthy)" || true)
+        else
+            # Local mode: just check if containers are running
+            local status=$(docker compose -f "$COMPOSE_FILE" ps --format "{{.Names}}: {{.Status}}" | grep openclaw || true)
+            healthy_count=$(echo "$status" | grep -c "Up" || true)
+        fi
         
         if [ "$healthy_count" -ge 1 ]; then
-            # At least one container healthy
-            log_success "Containers healthy: $status"
+            # At least one container healthy or running
+            log_success "Containers ready: $status"
             return 0
         fi
         
@@ -129,13 +154,13 @@ sleep 2
 echo ""
 log_info "Checking container status..."
 
-if docker ps | grep -q "openclaw"; then
+if docker compose -f "$COMPOSE_FILE" ps | grep -q "openclaw"; then
     log_success "Containers are running:"
-    docker ps --format "  {{.Names}}: {{.Status}}" | grep openclaw
+    docker compose -f "$COMPOSE_FILE" ps --format "  {{.Names}}: {{.Status}}"
 else
     log_warn "No OpenClaw containers found"
     log_info "Checking logs:"
-    docker compose logs --tail=20
+    docker compose -f "$COMPOSE_FILE" logs --tail=20
 fi
 
 echo ""
@@ -144,41 +169,49 @@ echo "║                    OpenClaw is Ready! 🚀                            
 echo "╚═══════════════════════════════════════════════════════════════════════╝"
 echo ""
 
-echo "📍 Access OpenClaw:"
-echo "─────────────────────────────────────────────"
-echo "  Web Interface:  http://localhost:18789"
-echo "  VNC Browser:    http://localhost:6080"
-echo "  API Gateway:    http://localhost:18790"
-echo ""
+if [ "$GATEWAY_MODE" = true ]; then
+    echo "📍 Access OpenClaw (Gateway Mode):"
+    echo "─────────────────────────────────────────────"
+    echo "  Web Interface:  http://localhost:18789"
+    echo "  VNC Browser:    http://localhost:6080"
+    echo "  API Gateway:    http://localhost:18790"
+    echo ""
+else
+    echo "📍 Local Mode (CLI only - no web interface)"
+    echo "─────────────────────────────────────────────"
+    echo "  SSH Access:     localhost:22"
+    echo "  Command line:   ./scripts/run-agent.sh"
+    echo ""
+fi
 
 echo "🔍 Monitor & Debug:"
 echo "─────────────────────────────────────────────"
-echo "  View logs:      docker compose logs -f"
+if [ "$GATEWAY_MODE" = true ]; then
+    echo "  View logs:      docker compose -f docker-compose-gateway.yml logs -f"
+else
+    echo "  View logs:      docker compose logs -f"
+fi
 echo "  Container status: docker ps"
 echo "  Stop:           docker compose down"
 echo ""
 
 echo "🧪 Test Agents:"
 echo "─────────────────────────────────────────────"
-echo "  ./scripts/test-agents.sh auth"
-echo "  ./scripts/test-agents.sh generate"
-echo "  ./scripts/test-agents.sh full-flow"
+echo "  ./scripts/run-agent.sh auth"
+echo "  ./scripts/run-agent.sh generate"
+echo "  ./scripts/run-agent.sh full-flow"
 echo ""
 
-echo "🌐 Remote Access:"
-echo "─────────────────────────────────────────────"
-echo "  SSH:            ./scripts/enable-direct-ssh.sh tailscale"
-echo "  Port Forward:   ./scripts/enable-remote.sh start"
-echo ""
-
-echo "📱 From Android:"
-echo "─────────────────────────────────────────────"
-echo "  Read:           docs/ANDROID_SSH_GUIDE.md"
-echo "  Setup:          ./scripts/enable-direct-ssh.sh android"
-echo ""
+if [ "$GATEWAY_MODE" = false ]; then
+    echo "🌐 Switch to Gateway Mode:"
+    echo "─────────────────────────────────────────────"
+    echo "  docker compose down"
+    echo "  ./scripts/start-openclaw.sh --gateway"
+    echo ""
+fi
 
 echo "═══════════════════════════════════════════════════════════════════════"
 echo ""
 
-log_success "Ready! Next: ./scripts/test-agents.sh quick-check"
+log_success "Ready! Next: ./scripts/run-agent.sh auth"
 echo ""

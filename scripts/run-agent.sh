@@ -94,6 +94,8 @@ check_gateway() {
     if ! docker ps | grep -q "openclaw"; then
         log_error "OpenClaw containers not running"
         log_info "Start with: ./scripts/start-openclaw.sh"
+        log_info "  For local mode (CLI only): ./scripts/start-openclaw.sh"
+        log_info "  For gateway mode (web UI): ./scripts/start-openclaw.sh --gateway"
         return 1
     fi
     
@@ -283,17 +285,18 @@ run_agent() {
     echo "═══════════════════════════════════════════════════════════════════════"
     echo ""
     
-    # Try HTTP API first (optional)
+    # Send via HTTP API first (optional, might not work in local mode)
+    # Local mode doesn't have gateway, so this will fail gracefully
     local api_response=$(curl -s -X POST "http://localhost:18789/api/conversation" \
         -H "Content-Type: application/json" \
         -d "{\"message\": $(echo "$prompt" | jq -Rs .)}" 2>&1)
     
-    if [ -n "$api_response" ] && ! echo "$api_response" | grep -qi "not found\|404\|error"; then
-        # API worked
+    if [ -n "$api_response" ] && ! echo "$api_response" | grep -qi "not found\|404\|error\|connection refused"; then
+        # API worked (gateway mode only)
         log_success "API Response:"
         echo "$api_response" | jq -r '.response // .message // .' 2>/dev/null || echo "$api_response"
     else
-        # API failed or not available, use docker exec (preferred method)
+        # API not available (expected in local mode) - use docker exec directly
         log_info "Using direct CLI execution (docker exec)..."
         echo ""
         
