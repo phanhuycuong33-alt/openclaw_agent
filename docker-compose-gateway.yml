@@ -144,7 +144,7 @@ services:
     depends_on:
       - openclaw-gateway
     healthcheck:
-      test: ["CMD", "test", "-f", "/etc/ssh/sshd_config"]
+      test: ["CMD", "pgrep", "-f", "sshd"]
       interval: 2s
       timeout: 1s
       retries: 3
