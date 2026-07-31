@@ -104,21 +104,21 @@ check_and_cleanup_ports() {
     docker compose -f "$COMPOSE_FILE" down -v --remove-orphans 2>/dev/null || true
     sleep 3  # Give OS time to release port
     
-    # Check if port 22 is still in use by something else
-    if lsof -i :22 >/dev/null 2>&1 || netstat -tuln 2>/dev/null | grep -q ":22 "; then
-        log_warn "Port 22 is still in use by another process!"
+    # Check if port 2222 is still in use (our new SSH port)
+    if lsof -i :2222 >/dev/null 2>&1 || netstat -tuln 2>/dev/null | grep -q ":2222 "; then
+        log_warn "Port 2222 is still in use by another process!"
         
         # Try to identify what's using it
-        local pid=$(lsof -t -i :22 2>/dev/null || true)
+        local pid=$(lsof -t -i :2222 2>/dev/null || true)
         if [ -n "$pid" ]; then
-            log_warn "Process using port 22: PID=$pid"
+            log_warn "Process using port 2222: PID=$pid"
             local proc=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
             log_warn "Process name: $proc"
         fi
         
         echo "  Options:"
         echo "    1. Stop the process: sudo kill -9 $pid"
-        echo "    2. Use different port: Edit docker-compose.yml, change '22:22' to '2222:22'"
+        echo "    2. Use different port: Edit docker-compose.yml, change '2222:22' to 'XXXX:22'"
         echo "    3. Restart WSL: wsl --shutdown"
         return 1
     fi
