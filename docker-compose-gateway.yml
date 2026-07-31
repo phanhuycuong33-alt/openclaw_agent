@@ -1,6 +1,6 @@
 services:
   openclaw-gateway:
-    image: openclaw-ssh:latest
+    image: ghcr.io/openclaw/openclaw:latest
     env_file:
       - path: docker/.env
         required: false
