@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 #
-# OpenClaw Agent - Run Agent via Gateway API
-# Gọi agent thông qua OpenClaw Gateway API
+# OpenClaw Agent - Run Agent via Docker Exec
+# Chạy agent trực tiếp trong container
 #
 # Usage: ./scripts/run-agent.sh auth
 #        ./scripts/run-agent.sh generate
 #        ./scripts/run-agent.sh "custom task description"
-#
-# Requires: Gateway mode running (./scripts/start-openclaw.sh --gateway)
 #
 
 set -e
@@ -27,36 +25,26 @@ log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-GATEWAY_URL="http://localhost:18789"
 
 # =============================================================================
 # PRE-FLIGHT CHECKS
 # =============================================================================
 
-check_gateway() {
-    log_info "Checking Gateway at $GATEWAY_URL..."
-    
-    if curl -s --connect-timeout 5 "$GATEWAY_URL/healthz" > /dev/null 2>&1; then
-        log_success "Gateway is running"
-        return 0
-    else
-        log_error "Gateway is NOT running!"
-        echo ""
-        echo "Start Gateway mode first:"
-        echo "  ./scripts/start-openclaw.sh --gateway"
-        echo ""
+check_docker() {
+    if ! docker ps >/dev/null 2>&1; then
+        log_error "Docker is not running"
+        log_info "Try: sudo service docker start"
         return 1
     fi
 }
 
-check_tools() {
-    if ! command -v jq &> /dev/null; then
-        log_warn "jq not installed (output may be raw JSON)"
+check_container() {
+    if ! docker ps | grep -q "openclaw-cli"; then
+        log_error "openclaw-cli container not running"
+        log_info "Start with: ./scripts/start-openclaw.sh"
+        return 1
     fi
-    if ! command -v curl &> /dev/null; then
-        log_error "curl not installed. Install with: sudo apt install curl"
-        exit 1
-    fi
+    log_success "openclaw-cli container is running"
 }
 
 # =============================================================================
@@ -154,7 +142,7 @@ PROMPT
 }
 
 # =============================================================================
-# RUN AGENT VIA GATEWAY API
+# RUN AGENT VIA DOCKER EXEC
 # =============================================================================
 
 run_agent() {
@@ -182,14 +170,13 @@ run_agent() {
     
     echo ""
     echo "╔═══════════════════════════════════════════════════════════════════════╗"
-    echo "║              OpenClaw Agent - Gateway API                              ║"
+    echo "║              OpenClaw Agent - Docker Exec                              ║"
     echo "╚═══════════════════════════════════════════════════════════════════════╝"
     echo ""
     
     log_info "Pre-flight checks..."
-    check_tools
-    check_gateway || return 1
-    log_success "Gateway ready"
+    check_docker || return 1
+    check_container || return 1
     echo ""
     
     log_info "Building prompt with specs..."
@@ -198,54 +185,22 @@ run_agent() {
     echo "Task: $task_input"
     echo ""
     
-    # Save prompt to temp file for curl
-    local prompt_file="/tmp/openclaw-prompt-$$.txt"
-    echo "$prompt" > "$prompt_file"
-    
-    log_info "Sending to Gateway API..."
-    echo "  POST $GATEWAY_URL/api/conversation"
+    log_info "Running agent via docker exec..."
     echo ""
     
     echo "═══════════════════════════════════════════════════════════════════════"
     echo ""
     
-    # Call Gateway API
-    local response
-    response=$(curl -s -X POST "$GATEWAY_URL/api/conversation" \
-        -H "Content-Type: application/json" \
-        -d "{\"message\": $(cat "$prompt_file" | jq -Rs .)}" 2>&1)
+    # Run via docker compose exec (like it worked before)
+    cd "$REPO_ROOT"
+    docker compose exec -T openclaw-cli node dist/index.js agent --message "$prompt"
     
-    local exit_code=$?
-    rm -f "$prompt_file"
-    
-    if [ $exit_code -ne 0 ]; then
-        log_error "API call failed"
-        echo "$response"
-        return 1
-    fi
-    
-    # Display response
-    log_success "API Response:"
-    echo ""
-    echo "$response" | jq -r '.response // .message // .error // .' 2>/dev/null || echo "$response"
     echo ""
     
     echo "═══════════════════════════════════════════════════════════════════════"
     echo ""
     
-    log_success "Task sent to agent"
-    echo ""
-    
-    log_info "Next steps:"
-    echo ""
-    echo "  1. Watch browser activity:"
-    echo "     → http://localhost:6080 (VNC)"
-    echo ""
-    echo "  2. Check results:"
-    echo "     $ cat ~/.openclaw/workspace/worker-auth-result.md"
-    echo ""
-    echo "  3. Debug with logs:"
-    echo "     $ docker compose -f docker-compose-gateway.yml logs -f"
+    log_success "Done"
     echo ""
 }
 
